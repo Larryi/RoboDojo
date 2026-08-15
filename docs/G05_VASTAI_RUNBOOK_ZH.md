@@ -13,6 +13,32 @@ export ROBODOJO_SIDECAR=/mnt/pqssd/RoboInter/RoboInterTools/annotations/lerobot_
 bash scripts/g05/run_smoke.sh
 ```
 
+## 一条 SSH 命令启动 VastAI 训练
+
+先在本机准备一次密钥文件，不要提交到 Git：
+
+```bash
+mkdir -p ~/.config/robodojo
+cp scripts/g05/vast.env.example ~/.config/robodojo/g05_vast.env
+chmod 600 ~/.config/robodojo/g05_vast.env
+$EDITOR ~/.config/robodojo/g05_vast.env
+```
+
+填入 `HF_TOKEN`、可选的 `MODELSCOPE_API_TOKEN`、`WANDB_API_KEY` 和
+`SERVERCHAN_SENDKEY`。随后只需输入 SSH 主机和端口：
+
+```bash
+bash scripts/g05/launch_vast_train.sh root@<VAST_IP> <SSH_PORT>
+```
+
+远端会自动：拉取两个 GitHub fork 分支、拉取 G05 代码、创建 Python 环境、
+安装依赖、从 HF 下载 Sidecar、从 ModelScope 下载 RoboDojo 数据和官方 G05
+checkpoint、生成 12 任务 manifest、按 `checkpointing_steps` 定期保存、只保留
+最近一个 checkpoint，并在训练结束后创建/上传到公开 HF model repo。
+
+Server酱在启动、训练开始、成功和失败时推送；未设置 `SERVERCHAN_SENDKEY`
+时仅关闭通知，不影响训练。
+
 ## 官方资产与许可证
 
 不要把 gated 权限、HF token 或私钥写入脚本。按 OpenGalaxea/GalaxeaVLA 官方仓库和 G0.5 Community License 操作，先在有权限的机器下载官方 `g05-base`/可续训 pretrained checkpoint、processor、action tokenizer，核对 license/模型 gated 访问条件，再通过 `G05_BASE_ASSETS` 指向本地目录。公开 RoboDojo fm-only checkpoint 仅作为降级评估/初始化参考，不能假设它包含 AR head。

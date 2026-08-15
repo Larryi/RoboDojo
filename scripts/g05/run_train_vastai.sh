@@ -6,6 +6,8 @@ set -euo pipefail
 : "${ROBODOJO_SIDECAR:?set sidecar path}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export G05_SIDECAR_JSONL="${G05_SIDECAR_JSONL:-${ROOT}/artifacts/g05_robodojo/subgoal_samples.jsonl}"
+export G05_SUBGOAL_MANIFEST="${G05_SUBGOAL_MANIFEST:-${G05_SIDECAR_JSONL}}"
+export G05_BALANCED_MANIFEST="${G05_BALANCED_MANIFEST:-${ROOT}/artifacts/g05_robodojo/balanced_samples.jsonl}"
 export G05_TRAIN_MODE="${G05_TRAIN_MODE:-ar_fm}"
 export G05_ACTION_SOURCE="${G05_ACTION_SOURCE:-ar_fm}"
 export G05_RESUME="${G05_RESUME:-}"
