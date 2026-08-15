@@ -36,6 +36,10 @@ bash scripts/g05/launch_vast_train.sh root@<VAST_IP> <SSH_PORT>
 checkpoint、生成 12 任务 manifest、按 `checkpointing_steps` 定期保存、只保留
 最近一个 checkpoint，并在训练结束后创建/上传到公开 HF model repo。
 
+默认 `G05_AUTO_RESUME=1`。如果之前的 Vast run 已留下 checkpoint，重新执行同一
+条启动命令会自动选择最新的 `step_*`/`checkpoint-*` 继续训练；也可以在 env 文件
+中显式设置 `G05_RESUME=/workspace/.../step_XXXX`。
+
 Server酱在启动、训练开始、成功和失败时推送；未设置 `SERVERCHAN_SENDKEY`
 时仅关闭通知，不影响训练。
 

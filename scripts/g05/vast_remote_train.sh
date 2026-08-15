@@ -24,6 +24,7 @@ set +a
 : "${G05_GPUS:=0,1,2,3}"
 : "${G05_SAVE_INTERVAL_STEPS:=2000}"
 : "${G05_KEEP_CHECKPOINTS:=1}"
+: "${G05_AUTO_RESUME:=1}"
 : "${G05_RUN_ID:=g05_robodojo_$(date +%Y%m%d_%H%M%S)}"
 : "${G05_TRAIN_TASK:=real/g0plus_xpolicylab_finetune}"
 : "${G05_DATASET_SOURCE:=modelscope}"
@@ -156,6 +157,12 @@ if [[ -z "${G05_INIT_CKPT:-}" ]]; then
   [[ -n "${G05_INIT_CKPT}" ]] && G05_INIT_CKPT="$(dirname "${G05_INIT_CKPT}")"
 fi
 export G05_INIT_CKPT
+
+if [[ "${G05_AUTO_RESUME}" == "1" && -z "${G05_RESUME:-}" ]]; then
+  G05_RESUME="$(find "${WORK_ROOT}/runs" -type d \( -name 'step_*' -o -name 'global_step_*' -o -name 'checkpoint-*' \) ! -path "${RUN_ROOT}/*" | sort -V | tail -1 || true)"
+  export G05_RESUME
+  [[ -z "${G05_RESUME}" ]] || echo "[resume] automatically using ${G05_RESUME}"
+fi
 
 write_status preparing_data
 export ROBODOJO_LEROBOT_V30_ROOT="${DATA_ROOT}"
