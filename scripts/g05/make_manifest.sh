@@ -12,5 +12,4 @@ python3 "${ROOT}/scripts/g05/sidecar_manifest.py" \
 python3 "${ROOT}/scripts/g05/balanced_sampler.py" \
   --input "${OUT}/subgoal_samples.jsonl" --output "${OUT}/balanced_samples.jsonl" \
   --samples "${G05_SAMPLES_PER_EPOCH:-34744}" --seed "${G05_SAMPLER_SEED:-42}"
-sha256sum "${OUT}/subgoal_samples.jsonl" "${OUT}/balanced_samples.jsonl" "${OUT}/sidecar_summary.json" > "${OUT}/manifest.sha256"
 printf '%s\n' "dataset=${DATASET}" "sidecar=${SIDECAR}" "output=${OUT}"

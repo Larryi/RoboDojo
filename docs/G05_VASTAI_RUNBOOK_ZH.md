@@ -4,7 +4,7 @@
 
 - 数据：`data/lerobot_v30_joint`，LeRobot v3，`meta/info.json` 报告 1200 episodes / 12 tasks / 592432 frames。
 - Sidecar：`/mnt/pqssd/RoboInter/RoboInterTools/annotations/lerobot_v30_joint.sqlite3`。`lang.video` 是全局 Task，`auto_annotation.segments[]` 提供边界和 `subgoal`。
-- 生成的 `subgoal_samples.jsonl` 保留 `task`，并增加 `subtask: Subtask: ...`；窗口尾部不会越过 segment 边界，短尾样本通过 `action_horizon` 提示 mask/pad。`balanced_samples.jsonl` 按 task-uniform → episode-uniform → frame/sample 抽样，避免长任务占优；三份清单文件同时写入 `manifest.sha256`。
+- 生成的 `subgoal_samples.jsonl` 保留 `task`，并增加 `subtask: Subtask: ...`；窗口尾部不会越过 segment 边界，短尾样本通过 `action_horizon` 提示 mask/pad。`balanced_samples.jsonl` 按 task-uniform → episode-uniform → frame/sample 抽样，避免长任务占优。
 
 ## 本机准备（不下载）
 
@@ -31,7 +31,6 @@ bash scripts/g05/sync_to_vastai.sh
 
 同步使用 rsync partial/resume；不会传递 shell 环境中的 token。实例内布局为 `RoboDojo/`、`G05/`、`data/lerobot_v30_joint/`、`annotations/`、`base_assets/`。生成 manifest 后运行：
 
-同步完成后实例根目录会生成 `transfer.manifest.sha256`，覆盖代码、G05 checkout、数据、Sidecar 和官方资产；训练前应保留它，回传后可在同一目录用 `sha256sum -c`（针对相同相对路径）抽查完整性。
 
 ```bash
 ssh "$VAST_HOST" 'cd /workspace/g05-run/RoboDojo && \

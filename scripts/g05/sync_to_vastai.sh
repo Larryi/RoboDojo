@@ -13,5 +13,4 @@ rsync -a --partial --info=progress2 --delete-delay "${G05_BASE_ASSETS}/" "${VAST
 rsync -a --partial --info=progress2 --delete-delay "${DATASET}/" "${VAST_HOST}:${VAST_ROOT}/data/lerobot_v30_joint/"
 rsync -a --partial --info=progress2 "${SIDECAR}" "${VAST_HOST}:${VAST_ROOT}/annotations/"
 ssh "${VAST_HOST}" "cd '${VAST_ROOT}/RoboDojo' && ROBODOJO_LEROBOT_V30_ROOT='${VAST_ROOT}/data/lerobot_v30_joint' ROBODOJO_SIDECAR='${VAST_ROOT}/annotations/$(basename "${SIDECAR}")' bash scripts/g05/make_manifest.sh artifacts/g05_robodojo"
-ssh "${VAST_HOST}" "cd '${VAST_ROOT}' && bash RoboDojo/scripts/g05/full_manifest.sh transfer.manifest.sha256 RoboDojo G05 data/lerobot_v30_joint annotations base_assets"
 echo "Sync complete. Run preflight on VastAI before training."
