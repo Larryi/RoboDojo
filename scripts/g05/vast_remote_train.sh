@@ -43,6 +43,7 @@ DATA_ROOT="${G05_DATA_ROOT:-${WORK_ROOT}/data/lerobot_v30_joint}"
 MODEL_ROOT="${WORK_ROOT}/models/robodojo"
 ASSET_ROOT="${WORK_ROOT}/models/g05-assets"
 VENV="${WORK_ROOT}/venv-g05"
+PYTHON_310="${G05_PYTHON:-$(command -v python3.10 || true)}"
 LOG="${RUN_ROOT}/logs/train.log"
 mkdir -p "${RUN_ROOT}/logs" "${WORK_ROOT}/cache" "${MODEL_ROOT}" "${ASSET_ROOT}"
 exec > >(tee -a "${LOG}") 2>&1
@@ -113,8 +114,23 @@ export HF_TOKEN
 export PYTHONUNBUFFERED=1
 mkdir -p "${HF_HOME}" "${HF_DATASETS_CACHE}" "${TRANSFORMERS_CACHE}"
 
+if [[ -z "${PYTHON_310}" && -x "$(command -v conda 2>/dev/null || true)" ]]; then
+  CONDA_PREFIX_G05="${WORK_ROOT}/conda-g05"
+  if [[ ! -x "${CONDA_PREFIX_G05}/bin/python" ]]; then
+    conda create -y -p "${CONDA_PREFIX_G05}" python=3.10.16
+  fi
+  PYTHON_310="${CONDA_PREFIX_G05}/bin/python"
+fi
+[[ -x "${PYTHON_310}" ]] || {
+  echo "Python 3.10.16 is required by G05, but python3.10 was not found. Set G05_PYTHON or install Python 3.10 on the Vast image." >&2
+  exit 3
+}
+
+if [[ -x "${VENV}/bin/python" ]] && ! "${VENV}/bin/python" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 10) else 1)'; then
+  rm -rf "${VENV}"
+fi
 if [[ ! -x "${VENV}/bin/python" ]]; then
-  python3 -m venv "${VENV}"
+  "${PYTHON_310}" -m venv "${VENV}"
 fi
 "${VENV}/bin/python" -m pip install --upgrade pip
 "${VENV}/bin/pip" install --upgrade "huggingface_hub[cli]" modelscope wandb
