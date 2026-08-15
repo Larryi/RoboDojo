@@ -32,7 +32,7 @@ bash scripts/g05/launch_vast_train.sh root@<VAST_IP> <SSH_PORT>
 ```
 
 远端会自动：拉取两个 GitHub fork 分支、拉取 G05 代码、创建 Python 环境、
-安装依赖、从 HF 下载 Sidecar、从 ModelScope 下载 RoboDojo 数据和官方 G05
+安装依赖、从 HF 下载 Sidecar 和官方 LeRobot v3 视频数据、从 ModelScope 下载官方 G05
 checkpoint、生成 12 任务 manifest、按 `checkpointing_steps` 定期保存、只保留
 最近一个 checkpoint，并在训练结束后创建/上传到公开 HF model repo。
 

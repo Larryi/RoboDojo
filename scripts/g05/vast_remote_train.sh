@@ -12,6 +12,8 @@ set +a
 
 : "${HF_TOKEN:?HF_TOKEN is required for dataset/model downloads and final upload}"
 : "${HF_DATASET_REPO:=larryi/RoboDojo-G05-12task}"
+: "${HF_DATASET_SOURCE_REPO:=RoboDojo-Benchmark/RoboDojo}"
+: "${HF_DATASET_SOURCE_PATH:=data/RoboDojo_lerobot_v30_video}"
 : "${HF_OUTPUT_REPO:=larryi/G05-RoboDojo-12task}"
 : "${ROBO_DOJO_REPO_URL:=https://github.com/Larryi/RoboDojo.git}"
 : "${ROBO_DOJO_BRANCH:=codex/g05-vastai-training}"
@@ -21,18 +23,18 @@ set +a
 : "${G05_REF:=main}"
 : "${MODELSCOPE_DATASET_REPO:=RoboDojo-Benchmark/RoboDojo}"
 : "${MODELSCOPE_CKPT_PREFIX:=ckpt/RoboDojo/G05/RoboDojo-sim-arx_x5-joint-0}"
-: "${G05_GPUS:=0,1,2,3}"
-: "${G05_SAVE_INTERVAL_STEPS:=2000}"
+: "${G05_GPUS:=0}"
+: "${G05_SAVE_INTERVAL_STEPS:=5000}"
 : "${G05_KEEP_CHECKPOINTS:=1}"
 : "${G05_AUTO_RESUME:=1}"
 : "${G05_RUN_ID:=g05_robodojo_$(date +%Y%m%d_%H%M%S)}"
 : "${G05_TRAIN_TASK:=real/g0plus_xpolicylab_finetune}"
-: "${G05_DATASET_SOURCE:=modelscope}"
+: "${G05_DATASET_SOURCE:=huggingface}"
 
 RUN_ROOT="${WORK_ROOT}/runs/${G05_RUN_ID}"
 REPO_ROOT="${WORK_ROOT}/RoboDojo"
 G05_ROOT="${WORK_ROOT}/G05"
-DATA_ROOT="${WORK_ROOT}/data/lerobot_v30_joint"
+DATA_ROOT="${G05_DATA_ROOT:-${WORK_ROOT}/data/lerobot_v30_joint}"
 MODEL_ROOT="${WORK_ROOT}/models/robodojo"
 ASSET_ROOT="${WORK_ROOT}/models/g05-assets"
 VENV="${WORK_ROOT}/venv-g05"
@@ -126,7 +128,12 @@ export ROBODOJO_SIDECAR="${WORK_ROOT}/annotations/annotations/lerobot_v30_joint.
 [[ -f "${ROBODOJO_SIDECAR}" ]] || ROBODOJO_SIDECAR="${WORK_ROOT}/annotations/lerobot_v30_joint.sqlite3"
 [[ -f "${ROBODOJO_SIDECAR}" ]] || { echo "Sidecar not found" >&2; exit 4; }
 
-if [[ "${G05_DATASET_SOURCE}" == "modelscope" && ! -f "${DATA_ROOT}/meta/info.json" ]]; then
+if [[ "${G05_DATASET_SOURCE}" == "huggingface" && ! -f "${DATA_ROOT}/meta/info.json" ]]; then
+  HF_DATA_ROOT="${WORK_ROOT}/robodojo-hf-data"
+  hf download "${HF_DATASET_SOURCE_REPO}" --repo-type dataset \
+    --include "${HF_DATASET_SOURCE_PATH}/**" --local-dir "${HF_DATA_ROOT}"
+  DATA_ROOT="${HF_DATA_ROOT}/${HF_DATASET_SOURCE_PATH}"
+elif [[ "${G05_DATASET_SOURCE}" == "modelscope" && ! -f "${DATA_ROOT}/meta/info.json" ]]; then
   if [[ -n "${MODELSCOPE_API_TOKEN:-}" ]]; then
     modelscope login --token "${MODELSCOPE_API_TOKEN}" || true
   fi
@@ -139,7 +146,7 @@ if [[ "${G05_DATASET_SOURCE}" == "modelscope" && ! -f "${DATA_ROOT}/meta/info.js
   fi
 fi
 [[ -f "${DATA_ROOT}/meta/info.json" ]] || {
-  echo "LeRobot dataset missing at ${DATA_ROOT}. Set G05_DATASET_SOURCE or upload the dataset to a Hub repo." >&2
+  echo "LeRobot dataset missing at ${DATA_ROOT}. Check G05_DATASET_SOURCE and HF_DATASET_SOURCE_PATH." >&2
   exit 5
 }
 
