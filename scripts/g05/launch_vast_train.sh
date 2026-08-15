@@ -6,6 +6,7 @@ SSH_PORT="${2:-${VAST_SSH_PORT:-22}}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REMOTE_ROOT="${G05_VAST_ROOT:-/workspace/g05-robodojo}"
 SSH_OPTS=(-p "${SSH_PORT}" -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
+SCP_OPTS=(-P "${SSH_PORT}" -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
 
 if [[ -n "${G05_VAST_SECRETS:-}" ]]; then
   SECRETS_FILE="${G05_VAST_SECRETS}"
@@ -30,8 +31,8 @@ fi
 [[ -f "${SECRETS_FILE}" ]] || { echo "Missing ${SECRETS_FILE}" >&2; exit 2; }
 
 ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "mkdir -p '${REMOTE_ROOT}/.secrets' '${REMOTE_ROOT}/logs'"
-scp "${SSH_OPTS[@]}" "${SECRETS_FILE}" "${SSH_TARGET}:${REMOTE_ROOT}/.secrets/g05.env"
-scp "${SSH_OPTS[@]}" "${ROOT}/scripts/g05/vast_remote_train.sh" "${SSH_TARGET}:${REMOTE_ROOT}/vast_remote_train.sh"
+scp "${SCP_OPTS[@]}" "${SECRETS_FILE}" "${SSH_TARGET}:${REMOTE_ROOT}/.secrets/g05.env"
+scp "${SCP_OPTS[@]}" "${ROOT}/scripts/g05/vast_remote_train.sh" "${SSH_TARGET}:${REMOTE_ROOT}/vast_remote_train.sh"
 ssh "${SSH_OPTS[@]}" "${SSH_TARGET}" "chmod 600 '${REMOTE_ROOT}/.secrets/g05.env' && chmod 700 '${REMOTE_ROOT}/vast_remote_train.sh' && nohup '${REMOTE_ROOT}/vast_remote_train.sh' >> '${REMOTE_ROOT}/logs/launcher.log' 2>&1 </dev/null & echo TRAIN_PID=\$!"
 echo "Remote G05 training launched."
 echo "Logs: ssh -p ${SSH_PORT} ${SSH_TARGET} tail -f ${REMOTE_ROOT}/logs/launcher.log"
