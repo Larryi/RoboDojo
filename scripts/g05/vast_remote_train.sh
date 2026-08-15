@@ -23,6 +23,8 @@ set +a
 : "${G05_REF:=main}"
 : "${MODELSCOPE_DATASET_REPO:=RoboDojo-Benchmark/RoboDojo}"
 : "${MODELSCOPE_CKPT_PREFIX:=ckpt/RoboDojo/G05/RoboDojo-sim-arx_x5-joint-0}"
+: "${G05_CHECKPOINT_SOURCE:=modelscope}"
+: "${HF_CHECKPOINT_REPO:=}"
 : "${G05_GPUS:=0}"
 : "${G05_SAVE_INTERVAL_STEPS:=5000}"
 : "${G05_KEEP_CHECKPOINTS:=1}"
@@ -151,11 +153,16 @@ fi
 }
 
 if [[ ! -f "${MODEL_ROOT}/.downloaded" ]]; then
-  if [[ -n "${MODELSCOPE_API_TOKEN:-}" ]]; then
-    modelscope login --token "${MODELSCOPE_API_TOKEN}" || true
+  if [[ "${G05_CHECKPOINT_SOURCE}" == "huggingface" ]]; then
+    : "${HF_CHECKPOINT_REPO:?Set HF_CHECKPOINT_REPO when G05_CHECKPOINT_SOURCE=huggingface}"
+    hf download "${HF_CHECKPOINT_REPO}" --repo-type model --local-dir "${MODEL_ROOT}"
+  else
+    if [[ -n "${MODELSCOPE_API_TOKEN:-}" ]]; then
+      modelscope login --token "${MODELSCOPE_API_TOKEN}" || true
+    fi
+    modelscope download --dataset "${MODELSCOPE_DATASET_REPO}" \
+      --include "${MODELSCOPE_CKPT_PREFIX}/**" --local_dir "${MODEL_ROOT}"
   fi
-  modelscope download --dataset "${MODELSCOPE_DATASET_REPO}" \
-    --include "${MODELSCOPE_CKPT_PREFIX}/**" --local_dir "${MODEL_ROOT}"
   touch "${MODEL_ROOT}/.downloaded"
 fi
 export G05_BASE_ASSETS="${ASSET_ROOT}"
