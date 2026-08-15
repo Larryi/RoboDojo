@@ -12,8 +12,8 @@ set +a
 
 : "${HF_TOKEN:?HF_TOKEN is required for dataset/model downloads and final upload}"
 : "${HF_DATASET_REPO:=larryi/RoboDojo-G05-12task}"
-: "${HF_DATASET_SOURCE_REPO:=RoboDojo-Benchmark/RoboDojo}"
-: "${HF_DATASET_SOURCE_PATH:=data/RoboDojo_lerobot_v30_video}"
+: "${HF_DATASET_SOURCE_REPO:=RoboDojo-Benchmark/GOAI-2026}"
+: "${HF_DATASET_SOURCE_PATH:=data/lerobot_v30_joint}"
 : "${HF_OUTPUT_REPO:=larryi/G05-RoboDojo-12task}"
 : "${ROBO_DOJO_REPO_URL:=https://github.com/Larryi/RoboDojo.git}"
 : "${ROBO_DOJO_BRANCH:=codex/g05-vastai-training}"
@@ -25,6 +25,9 @@ set +a
 : "${MODELSCOPE_CKPT_PREFIX:=ckpt/RoboDojo/G05/RoboDojo-sim-arx_x5-joint-0}"
 : "${G05_CHECKPOINT_SOURCE:=modelscope}"
 : "${HF_CHECKPOINT_REPO:=}"
+: "${HF_G05_BASE_REPO:=OpenGalaxea/G05}"
+: "${HF_G05_PROCESSOR_PATH:=qwen3_5_2b_base_processor}"
+: "${HF_G05_ACTION_TOKENIZER_PATH:=action_tokenizer.pt}"
 : "${G05_GPUS:=0}"
 : "${G05_SAVE_INTERVAL_STEPS:=5000}"
 : "${G05_KEEP_CHECKPOINTS:=1}"
@@ -148,11 +151,13 @@ elif [[ "${G05_DATASET_SOURCE}" == "modelscope" && ! -f "${DATA_ROOT}/meta/info.
   fi
 fi
 [[ -f "${DATA_ROOT}/meta/info.json" ]] || {
-  echo "LeRobot dataset missing at ${DATA_ROOT}. Check G05_DATASET_SOURCE and HF_DATASET_SOURCE_PATH." >&2
+  echo "LeRobot dataset missing at ${DATA_ROOT}. Check HF_DATASET_SOURCE_REPO and HF_DATASET_SOURCE_PATH." >&2
   exit 5
 }
 
-if [[ ! -f "${MODEL_ROOT}/.downloaded" ]]; then
+if [[ -n "${G05_INIT_CKPT:-}" && -d "${G05_INIT_CKPT}" ]]; then
+  echo "[checkpoint] using user-provided G05_INIT_CKPT=${G05_INIT_CKPT}"
+elif [[ ! -f "${MODEL_ROOT}/.downloaded" ]]; then
   if [[ "${G05_CHECKPOINT_SOURCE}" == "huggingface" ]]; then
     : "${HF_CHECKPOINT_REPO:?Set HF_CHECKPOINT_REPO when G05_CHECKPOINT_SOURCE=huggingface}"
     hf download "${HF_CHECKPOINT_REPO}" --repo-type model --local-dir "${MODEL_ROOT}"
@@ -166,6 +171,15 @@ if [[ ! -f "${MODEL_ROOT}/.downloaded" ]]; then
   touch "${MODEL_ROOT}/.downloaded"
 fi
 export G05_BASE_ASSETS="${ASSET_ROOT}"
+if [[ ! -f "${ASSET_ROOT}/${HF_G05_PROCESSOR_PATH}/config.json" || ! -f "${ASSET_ROOT}/${HF_G05_ACTION_TOKENIZER_PATH}" ]]; then
+  echo "[assets] downloading G05 processor and action tokenizer from ${HF_G05_BASE_REPO}"
+  hf download "${HF_G05_BASE_REPO}" --repo-type model \
+    --include "${HF_G05_PROCESSOR_PATH}/**" "${HF_G05_ACTION_TOKENIZER_PATH}" \
+    --local-dir "${ASSET_ROOT}"
+fi
+export G05_ACTION_TOKENIZER_PATH="${ASSET_ROOT}/${HF_G05_ACTION_TOKENIZER_PATH}"
+G05_PROCESSOR_DIR="${ASSET_ROOT}/${HF_G05_PROCESSOR_PATH}"
+export G05_PROCESSOR_DIR
 if [[ -z "${G05_INIT_CKPT:-}" ]]; then
   G05_INIT_CKPT="$(find "${MODEL_ROOT}" -type f \( -name model_state_dict.pt -o -name checkpoint.pt -o -name checkpoint \) | sort | head -1 || true)"
   [[ -n "${G05_INIT_CKPT}" ]] && G05_INIT_CKPT="$(dirname "${G05_INIT_CKPT}")"
@@ -200,6 +214,11 @@ export WANDB_API_KEY="${WANDB_API_KEY:-}"
 export WANDB_MODE="${WANDB_MODE:-online}"
 export WANDB_PROJECT="${WANDB_PROJECT:-g05-robodojo}"
 mkdir -p "${G05_OUTPUT_ROOT}" "${GALAXEA_FM_DATASET_STATS_CACHE_DIR}"
+
+# The RoboDojo checkpoint's Hydra config contains the publisher's absolute
+# processor path. Override it with the processor downloaded above.
+G05_TRAIN_ARGS="${G05_TRAIN_ARGS:-} model.model_arch.hf_processor_path=${G05_PROCESSOR_DIR}"
+export G05_TRAIN_ARGS
 
 prune_loop() {
   while true; do
