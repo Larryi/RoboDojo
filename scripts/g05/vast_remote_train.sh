@@ -234,6 +234,14 @@ mkdir -p "${G05_ROOT}/configs/task"
 sed -i \
   "s#/personal/tianxing/RoboDojo/data/RoboDojo_lerobot_v30_video#${DATA_ROOT}#g" \
   "${G05_ROOT}/configs/task/robodojo_g05.yaml"
+# GOAI-2026 stores the LeRobot v3 videos as AV1. The Vast image's
+# torchcodec build does not decode these AV1 files reliably, which surfaces as
+# the misleading `'NoneType' object is not subscriptable` loader error.
+if ! grep -Eq "^[[:space:]]+video_backend:" "${G05_ROOT}/configs/task/robodojo_g05.yaml"; then
+  sed -i "/^[[:space:]]*lerobot_ds_version:[[:space:]]*['\"]\?3\.0['\"]\?$/a\\      video_backend: pyav" \
+    "${G05_ROOT}/configs/task/robodojo_g05.yaml"
+fi
+echo "[dataset] video_backend=$(awk '/^[[:space:]]+video_backend:/{print $2; exit}' "${G05_ROOT}/configs/task/robodojo_g05.yaml")"
 "${VENV}/bin/python" - "${G05_ROOT}/configs/task/robodojo_g05.yaml" <<'PY'
 from pathlib import Path
 import sys
