@@ -278,7 +278,13 @@ mkdir -p "${G05_OUTPUT_ROOT}" "${GALAXEA_FM_DATASET_STATS_CACHE_DIR}"
 
 # The RoboDojo checkpoint's Hydra config contains the publisher's absolute
 # processor path. Override it with the processor downloaded above.
-G05_TRAIN_ARGS="${G05_TRAIN_ARGS:-} model.model_arch.hf_processor_path=${G05_PROCESSOR_DIR}"
+G05_TRAIN_ARGS="${G05_TRAIN_ARGS:-}"
+# Migrate legacy G0Plus override names that may still be present in the
+# user's secrets file; native RoboDojo G05 keeps these at the config root.
+G05_TRAIN_ARGS="${G05_TRAIN_ARGS//model.batch_size/batch_size}"
+G05_TRAIN_ARGS="${G05_TRAIN_ARGS//model.grad_accumulation_steps/grad_accumulation_steps}"
+G05_TRAIN_ARGS="${G05_TRAIN_ARGS//checkpoint.resume/resume_ckpt}"
+G05_TRAIN_ARGS+=" model.model_arch.hf_processor_path=${G05_PROCESSOR_DIR}"
 export G05_TRAIN_ARGS
 
 prune_loop() {
