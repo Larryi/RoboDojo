@@ -226,7 +226,10 @@ fi
 CHECKPOINT_CONFIG="${MODEL_ROOT}/${HF_CHECKPOINT_PATH}/.hydra/config.yaml"
 [[ -f "${CHECKPOINT_CONFIG}" ]] || { echo "G05 checkpoint Hydra config missing: ${CHECKPOINT_CONFIG}" >&2; exit 8; }
 mkdir -p "${G05_ROOT}/configs/task"
-cp -f "${CHECKPOINT_CONFIG}" "${G05_ROOT}/configs/task/robodojo_g05.yaml"
+{
+  echo "# @package _global_"
+  cat "${CHECKPOINT_CONFIG}"
+} > "${G05_ROOT}/configs/task/robodojo_g05.yaml"
 # The published config contains the original machine-local dataset path.
 sed -i \
   "s#/personal/tianxing/RoboDojo/data/RoboDojo_lerobot_v30_video#${DATA_ROOT}#g" \
