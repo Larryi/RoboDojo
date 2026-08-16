@@ -354,6 +354,12 @@ G05_TRAIN_ARGS="${G05_TRAIN_ARGS:-}"
 # Migrate only the resume key from older launchers; batch size and gradient
 # accumulation belong under model in the published RoboDojo checkpoint config.
 G05_TRAIN_ARGS="${G05_TRAIN_ARGS//checkpoint.resume/resume_ckpt}"
+# The published checkpoint leaves both max_epochs and max_steps null, but the
+# released finetune.py requires one of them to build the LR scheduler.
+if [[ " ${G05_TRAIN_ARGS} " != *" model.max_steps="* && " ${G05_TRAIN_ARGS} " != *" model.max_epochs="* ]]; then
+  G05_MAX_STEPS="${G05_MAX_STEPS:-100000}"
+  G05_TRAIN_ARGS+=" model.max_steps=${G05_MAX_STEPS}"
+fi
 G05_TRAIN_ARGS+=" model.model_arch.hf_processor_path=${G05_PROCESSOR_DIR}"
 export G05_TRAIN_ARGS
 
