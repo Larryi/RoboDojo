@@ -193,9 +193,9 @@ if "video_backend: Optional[str] = None" not in text:
     if old_param not in text:
         raise SystemExit(f"Cannot patch video_backend parameter in {path}")
     text = text.replace(old_param, new_param, 1)
-old_call = "                    load_images=self.load_images,\n                    in_memory=self.in_memory,\n"
-new_call = "                    load_images=self.load_images,\n                    video_backend=video_backend,\n                    in_memory=self.in_memory,\n"
-if "                    video_backend=video_backend,\n" not in text:
+old_call = "                load_images=self.load_images,\n                in_memory=self.in_memory,\n"
+new_call = "                load_images=self.load_images,\n                video_backend=video_backend,\n                in_memory=self.in_memory,\n"
+if "                video_backend=video_backend,\n" not in text:
     if old_call not in text:
         raise SystemExit(f"Cannot patch video_backend forwarding in {path}")
     text = text.replace(old_call, new_call, 1)
