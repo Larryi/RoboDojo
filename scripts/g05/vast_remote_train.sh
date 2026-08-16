@@ -38,6 +38,12 @@ set +a
 : "${G05_RUN_ID:=g05_robodojo_$(date +%Y%m%d_%H%M%S)}"
 : "${G05_TRAIN_TASK:=robodojo_g05}"
 : "${G05_USE_SIDECAR:=0}"
+# Older secrets files may still carry the legacy PaliGemma task. It is not
+# compatible with the Qwen3.5 RoboDojo checkpoint; transparently migrate it.
+if [[ "${G05_TRAIN_TASK}" == "real/g0plus_xpolicylab_finetune" ]]; then
+  echo "[config] replacing legacy G0Plus task with native RoboDojo G05 task"
+  G05_TRAIN_TASK="robodojo_g05"
+fi
 : "${G05_DATASET_SOURCE:=huggingface}"
 
 RUN_ROOT="${WORK_ROOT}/runs/${G05_RUN_ID}"
