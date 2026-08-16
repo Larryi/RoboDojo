@@ -23,8 +23,9 @@ set +a
 : "${G05_REF:=main}"
 : "${MODELSCOPE_DATASET_REPO:=RoboDojo-Benchmark/RoboDojo}"
 : "${MODELSCOPE_CKPT_PREFIX:=ckpt/RoboDojo/G05/RoboDojo-sim-arx_x5-joint-0}"
-: "${G05_CHECKPOINT_SOURCE:=modelscope}"
-: "${HF_CHECKPOINT_REPO:=}"
+: "${G05_CHECKPOINT_SOURCE:=huggingface}"
+: "${HF_CHECKPOINT_REPO:=RoboDojo-Benchmark/RoboDojo}"
+: "${HF_CHECKPOINT_PATH:=${MODELSCOPE_CKPT_PREFIX}}"
 : "${HF_G05_BASE_REPO:=OpenGalaxea/G05}"
 : "${HF_G05_PROCESSOR_PATH:=qwen3_5_2b_base_processor}"
 : "${HF_G05_ACTION_TOKENIZER_PATH:=action_tokenizer.pt}"
@@ -191,8 +192,8 @@ if [[ -n "${G05_INIT_CKPT:-}" && -d "${G05_INIT_CKPT}" ]]; then
   echo "[checkpoint] using user-provided G05_INIT_CKPT=${G05_INIT_CKPT}"
 elif [[ ! -f "${MODEL_ROOT}/.downloaded" ]]; then
   if [[ "${G05_CHECKPOINT_SOURCE}" == "huggingface" ]]; then
-    : "${HF_CHECKPOINT_REPO:?Set HF_CHECKPOINT_REPO when G05_CHECKPOINT_SOURCE=huggingface}"
-    hf download "${HF_CHECKPOINT_REPO}" --repo-type model --local-dir "${MODEL_ROOT}"
+    hf download "${HF_CHECKPOINT_REPO}" --repo-type dataset \
+      --include "${HF_CHECKPOINT_PATH}/**" --local-dir "${MODEL_ROOT}"
   else
     if [[ -n "${MODELSCOPE_API_TOKEN:-}" ]]; then
       modelscope login --token "${MODELSCOPE_API_TOKEN}" || true
