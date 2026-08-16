@@ -30,6 +30,8 @@ set +a
 : "${HF_G05_PROCESSOR_PATH:=qwen3_5_2b_base_processor}"
 : "${HF_G05_ACTION_TOKENIZER_PATH:=action_tokenizer.pt}"
 : "${G05_GPUS:=0}"
+: "${G05_TORCH_VERSION:=2.7.0}"
+: "${G05_TORCH_INDEX_URL:=https://download.pytorch.org/whl/cu128}"
 : "${G05_SAVE_INTERVAL_STEPS:=5000}"
 : "${G05_KEEP_CHECKPOINTS:=1}"
 : "${G05_AUTO_RESUME:=1}"
@@ -157,6 +159,13 @@ elif [[ -f "${G05_ROOT}/GalaxeaVLA/pyproject.toml" ]]; then
   G05_ROOT="${G05_ROOT}/GalaxeaVLA"
   "${VENV}/bin/pip" install -e "${G05_ROOT}"
 fi
+# RTX PRO 6000 Blackwell is sm_120. The older torch pulled by some G05
+# dependency sets only contains kernels through sm_90. PyTorch 2.7 cu128 is
+# the first stable wheel family with Blackwell support.
+"${VENV}/bin/pip" install --upgrade \
+  "torch==${G05_TORCH_VERSION}" \
+  --index-url "${G05_TORCH_INDEX_URL}"
+"${VENV}/bin/python" -c 'import torch; assert torch.cuda.is_available(), "CUDA is unavailable"; print(f"[torch] {torch.__version__} CUDA={torch.version.cuda} GPU={torch.cuda.get_device_name(0)} capability={torch.cuda.get_device_capability(0)}")'
 export PATH="${VENV}/bin:${PATH}"
 hf auth whoami >/dev/null
 
