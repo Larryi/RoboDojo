@@ -7,6 +7,7 @@ OUT="${1:-${ROOT}/artifacts/g05_robodojo}"
 mkdir -p "${OUT}"
 python3 "${ROOT}/scripts/g05/sidecar_manifest.py" \
   --sidecar "${SIDECAR}" --expected-tasks "${G05_EXPECTED_TASKS:-12}" \
+  --min-unique-subgoals "${G05_MIN_UNIQUE_SUBGOALS:-100}" \
   --chunk "${G05_ACTION_CHUNK:-16}" --stride "${G05_SAMPLE_STRIDE:-16}" \
   --manifest "${OUT}/subgoal_samples.jsonl" --summary "${OUT}/sidecar_summary.json"
 python3 "${ROOT}/scripts/g05/balanced_sampler.py" \

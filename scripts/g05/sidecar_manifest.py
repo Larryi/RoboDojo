@@ -37,21 +37,41 @@ def load_episodes(db: Path, camera: str):
         item["task"] = item["task"] or str(lang.get("video") or lang.get("task") or "")
         auto = payload.get("auto_annotation") or {}
         segments = auto.get("segments") or []
+        semantics = auto.get("vlm_semantics") or {}
         # Prefer the record carrying the complete segment list (normally frame 0).
         if len(segments) > len(item["segments"]):
-            item["segments"] = [
-                {
-                    "segment_id": int(s.get("segment_id", i)),
-                    "start_frame": int(s["start_frame"]),
-                    "end_frame": int(s["end_frame"]),
-                    "subgoal": str(s.get("subgoal") or s.get("task") or "").strip(),
-                    "task": str(s.get("task") or item["task"]).strip(),
-                    "source": s.get("source"),
-                    "status": s.get("status"),
-                }
-                for i, s in enumerate(segments)
-                if "start_frame" in s and "end_frame" in s
-            ]
+            resolved = []
+            for i, segment in enumerate(segments):
+                if "start_frame" not in segment or "end_frame" not in segment:
+                    continue
+                segment_id = int(segment.get("segment_id", i))
+                semantic = semantics.get(str(segment_id), {}) or {}
+                annotation = semantic.get("annotation") or {}
+                client_description = semantic.get("client_description") or []
+                raw_annotation = semantic.get("raw_model_annotation") or {}
+                candidates = (
+                    ("annotation", annotation.get("subgoal")),
+                    ("client_description", client_description[0] if client_description else None),
+                    ("raw_model_annotation", raw_annotation.get("subgoal")),
+                    ("segment_fallback", segment.get("subgoal") or segment.get("task")),
+                )
+                semantic_source, subgoal = next(
+                    ((source, str(value).strip()) for source, value in candidates if str(value or "").strip()),
+                    ("missing", ""),
+                )
+                resolved.append(
+                    {
+                        "segment_id": segment_id,
+                        "start_frame": int(segment["start_frame"]),
+                        "end_frame": int(segment["end_frame"]),
+                        "subgoal": subgoal,
+                        "subgoal_source": semantic_source,
+                        "task": str(segment.get("task") or item["task"]).strip(),
+                        "source": segment.get("source"),
+                        "status": segment.get("status"),
+                    }
+                )
+            item["segments"] = resolved
     return episodes
 
 
@@ -121,6 +141,7 @@ def main():
     ap.add_argument("--sidecar", type=Path, required=True)
     ap.add_argument("--camera", default="observation.images.cam_high")
     ap.add_argument("--expected-tasks", type=int, default=12)
+    ap.add_argument("--min-unique-subgoals", type=int, default=0)
     ap.add_argument("--chunk", type=int, default=16)
     ap.add_argument("--stride", type=int, default=16)
     ap.add_argument("--manifest", type=Path)
@@ -130,13 +151,22 @@ def main():
         ap.error(f"sidecar not found: {args.sidecar}")
     episodes = load_episodes(args.sidecar, args.camera)
     tasks, errors = validate(episodes, args.expected_tasks)
+    segments = [segment for episode in episodes.values() for segment in episode["segments"]]
+    unique_subgoals = len({segment["subgoal"] for segment in segments if segment["subgoal"]})
+    subgoal_sources = Counter(segment["subgoal_source"] for segment in segments)
+    if unique_subgoals < args.min_unique_subgoals:
+        errors.append(
+            f"expected at least {args.min_unique_subgoals} unique subgoals, found {unique_subgoals}"
+        )
     summary = {
         "sidecar": str(args.sidecar.resolve()),
         "sidecar_sha256": hashlib.sha256(args.sidecar.read_bytes()).hexdigest(),
         "episodes": len(episodes),
         "tasks": len(tasks),
         "episodes_per_task": dict(sorted(Counter(x["task"] for x in episodes.values()).items())),
-        "segments": sum(len(x["segments"]) for x in episodes.values()),
+        "segments": len(segments),
+        "unique_subgoals": unique_subgoals,
+        "subgoal_sources": dict(sorted(subgoal_sources.items())),
         "task_names": sorted(tasks),
         "errors": errors,
         "chunk": args.chunk,
