@@ -273,6 +273,13 @@ echo "[dataset] video_backend=$(awk '/^[[:space:]]+video_backend:/{print $2; exi
 sed -i -E 's/^  in_memory:[[:space:]]*true$/  in_memory: false/' \
   "${G05_ROOT}/configs/task/robodojo_g05.yaml"
 echo "[dataset] in_memory=$(awk '/^  in_memory:/{print $2; exit}' "${G05_ROOT}/configs/task/robodojo_g05.yaml")"
+# FLA's Triton gated-delta kernel currently fails to lower for Blackwell
+# (sm_120) with the installed Torch/Triton pair. G05 ships a numerically
+# compatible pure-PyTorch implementation; use it unless explicitly changed.
+G05_LINEAR_ATTN_BACKEND="${G05_LINEAR_ATTN_BACKEND:-torch}"
+sed -i -E "s/(^[[:space:]]*linear_attn_backend:)[[:space:]]*.*/\\1 ${G05_LINEAR_ATTN_BACKEND}/" \
+  "${G05_ROOT}/configs/task/robodojo_g05.yaml"
+echo "[model] linear_attn_backend=$(awk '/^[[:space:]]+linear_attn_backend:/{print $2; exit}' "${G05_ROOT}/configs/task/robodojo_g05.yaml")"
 "${VENV}/bin/python" - "${G05_ROOT}/configs/task/robodojo_g05.yaml" <<'PY'
 from pathlib import Path
 import sys
