@@ -522,10 +522,12 @@ cfg.model.model_arch.action_attend_cot = True
 cfg.model.model_arch.discrete_action = False
 cfg.model.model_arch.continuous_action = True
 cfg.model.model_arch.return_continuous_action = True
+cfg.model.model_arch.ar.ce_weight = 1.0
+cfg.model.processor.drop_high_level_prob = 0.0
 cfg.model.processor.samples_builder = {
     "_target_": "g05.data_processor.processor.samples_builder.SubtaskCoTBuilderFMOnly"
 }
-OmegaConf.save(cfg, path)
+path.write_text("# @package _global_\n\n" + OmegaConf.to_yaml(cfg), encoding="utf-8")
 print("[subgoal] enabled main-task -> predicted-subgoal -> FM-action training")
 PY
 "${VENV}/bin/python" - "${G05_ROOT}/configs/task/robodojo_g05.yaml" <<'PY'
@@ -543,6 +545,8 @@ required = (
     "model.model_arch.hf_processor_path",
     "model.model_arch.predict_cot",
     "model.model_arch.action_attend_cot",
+    "model.model_arch.ar.ce_weight",
+    "model.processor.drop_high_level_prob",
     "model.processor.samples_builder._target_",
 )
 missing = []
