@@ -106,7 +106,9 @@ def emit_manifest(episodes, out: Path, chunk: int, stride: int):
                         "segment_start": start,
                         "segment_end": end,
                         "task": item["task"],
-                        "subtask": f"Subtask: {seg['subgoal']}",
+                        # Keep the target as plain text. SubtaskCoTBuilderFMOnly
+                        # owns the prompt/template and adds the Subtask label.
+                        "subtask": seg["subgoal"],
                         "action_horizon": min(chunk, end - frame + 1),
                     }
                     f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")

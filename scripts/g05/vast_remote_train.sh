@@ -30,7 +30,7 @@ set +a
 : "${HF_G05_PROCESSOR_PATH:=qwen3_5_2b_base_processor}"
 : "${HF_G05_ACTION_TOKENIZER_PATH:=action_tokenizer.pt}"
 : "${G05_GPUS:=0}"
-: "${G05_TORCH_VERSION:=2.7.0}"
+: "${G05_TORCH_VERSION:=2.7.1}"
 : "${G05_TORCH_INDEX_URL:=https://download.pytorch.org/whl/cu128}"
 : "${G05_SAVE_INTERVAL_STEPS:=5000}"
 : "${G05_KEEP_CHECKPOINTS:=1}"
@@ -38,6 +38,8 @@ set +a
 : "${G05_RUN_ID:=g05_robodojo_$(date +%Y%m%d_%H%M%S)}"
 : "${G05_TRAIN_TASK:=robodojo_g05}"
 : "${G05_USE_SIDECAR:=0}"
+: "${G05_TORCH_COMPILE:=0}"
+: "${G05_BATCH_SIZE:=10}"
 # Older secrets files may still carry the legacy PaliGemma task. It is not
 # compatible with the Qwen3.5 RoboDojo checkpoint; transparently migrate it.
 if [[ "${G05_TRAIN_TASK}" == "real/g0plus_xpolicylab_finetune" ]]; then
@@ -156,6 +158,15 @@ DEPS_MARKER="${VENV}/.g05_deps_ready"
 if [[ -f "${G05_ROOT}/GalaxeaVLA/pyproject.toml" ]]; then
   G05_ROOT="${G05_ROOT}/GalaxeaVLA"
 fi
+if [[ -f "${DEPS_MARKER}" ]] && ! "${VENV}/bin/python" - "${G05_TORCH_VERSION}" <<'PY'
+import sys
+import torch
+raise SystemExit(0 if torch.__version__.split("+")[0] == sys.argv[1] else 1)
+PY
+then
+  echo "[deps] Torch version mismatch; reinstalling the G05 dependency set"
+  rm -f "${DEPS_MARKER}"
+fi
 if [[ ! -f "${DEPS_MARKER}" ]]; then
   "${VENV}/bin/python" -m pip install --upgrade pip
   "${VENV}/bin/pip" install --upgrade "huggingface_hub[cli]" modelscope wandb
@@ -165,9 +176,9 @@ if [[ ! -f "${DEPS_MARKER}" ]]; then
       export HF_HUB_ENABLE_HF_TRANSFER=0
     fi
   fi
-  if [[ -f "${G05_ROOT}/pyproject.toml" ]]; then
-    "${VENV}/bin/pip" install -e "${G05_ROOT}"
-  fi
+if [[ -f "${G05_ROOT}/pyproject.toml" ]]; then
+  "${VENV}/bin/pip" install -e "${G05_ROOT}"
+fi
   # RTX PRO 6000 Blackwell is sm_120. Install the CUDA 12.8 wheel family.
   "${VENV}/bin/pip" install --upgrade \
     "torch==${G05_TORCH_VERSION}" \
@@ -206,25 +217,22 @@ if "                video_backend=video_backend,\n" not in text:
 # __getitem__ translates a manifest position to an original global frame
 # index. The base loader must therefore validate/retry against the physical
 # dataset length, not the subclass's logical length.
-old_bounds = """    def __getitem__(self, idx):
-        if idx >= len(self):
-            raise IndexError(f\"Index {idx} out of bounds {len(self)}.\")
-
-        # Retry with random indices until we successfully load a frame.
-        sample_idx = idx
-"""
-new_bounds = """    def __getitem__(self, idx):
-        physical_len = self.multi_dataset.num_frames
-        if idx < 0 or idx >= physical_len:
-            raise IndexError(f\"Index {idx} out of bounds {physical_len}.\")
-
-        # Retry with random indices until we successfully load a frame.
-        sample_idx = idx
-"""
-if new_bounds not in text:
-    if old_bounds not in text:
-        raise SystemExit(f\"Cannot patch manifest index bounds in {path}\")
-    text = text.replace(old_bounds, new_bounds, 1)
+if "physical_len = self.multi_dataset.num_frames" not in text:
+    old_check = "        if idx >= len(self):\n"
+    old_error = "            raise IndexError(f\"Index {idx} out of bounds {len(self)}.\")\n"
+    if old_check not in text or old_error not in text:
+        raise SystemExit(f"Cannot patch manifest index bounds in {path}")
+    text = text.replace(
+        old_check,
+        "        physical_len = self.multi_dataset.num_frames\n"
+        "        if idx < 0 or idx >= physical_len:\n",
+        1,
+    )
+    text = text.replace(
+        old_error,
+        "            raise IndexError(f\"Index {idx} out of bounds {physical_len}.\")\n",
+        1,
+    )
 
 old_retry = "sample_idx = np.random.randint(len(self))"
 new_retry = "sample_idx = np.random.randint(physical_len)"
@@ -234,8 +242,186 @@ old_retry_base = "sample_idx = np.random.randint(BaseLerobotDataset.__len__(self
 if old_retry_base in text:
     text = text.replace(old_retry_base, new_retry, 1)
 
+old_index_translation = """        else:
+            sample_idx = idx + self._start_idx
+"""
+new_index_translation = """        else:
+            if getattr(self, "_manifest_global_index_mode", False):
+                sample_idx = idx
+            else:
+                sample_idx = idx + self._start_idx
+"""
+if new_index_translation not in text:
+    if old_index_translation not in text:
+        raise SystemExit(f"Cannot patch manifest global index translation in {path}")
+    text = text.replace(old_index_translation, new_index_translation, 1)
+
 path.write_text(text)
 print(f"[loader] patched {path}")
+PY
+"${VENV}/bin/python" - "${G05_ROOT}/src/g05/data/galaxea_lerobot_dataset.py" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+if "self._sidecar_rows = {}" not in text:
+    text = text.replace("import torch\n", "import json\nfrom pathlib import Path\n\nimport torch\n", 1)
+    old_params = "        tolerance_s: Optional[float] = None,\n        **kwargs,\n"
+    new_params = "        tolerance_s: Optional[float] = None,\n        subgoal_manifest: Optional[str] = None,\n        balanced_manifest: Optional[str] = None,\n        preserve_global_task: bool = True,\n        action_chunk_boundary: Optional[str] = None,\n        **kwargs,\n"
+    if old_params not in text:
+        raise SystemExit(f"Cannot add subgoal parameters in {path}")
+    text = text.replace(old_params, new_params, 1)
+    marker = "        self._future_task_offset = future_task_offset\n"
+    init = ("        self.preserve_global_task = preserve_global_task\n"
+            "        self.action_chunk_boundary = action_chunk_boundary\n"
+            "        self._sidecar_rows = {}\n"
+            "        self._manifest_global_indices = None\n"
+            "        manifest_path = balanced_manifest if is_training_set and balanced_manifest else subgoal_manifest\n"
+            "        if manifest_path:\n"
+            "            self._load_subgoal_manifest(Path(manifest_path))\n")
+    if marker not in text:
+        raise SystemExit(f"Cannot initialize subgoal manifest in {path}")
+    text = text.replace(marker, init + marker, 1)
+    old_len = ("    def __len__(self):\n"
+               "        if hasattr(self, \"_overfit_len\"):\n"
+               "            return self._overfit_len\n")
+    new_len = ("    def __len__(self):\n"
+               "        if self._manifest_global_indices is not None:\n"
+               "            return len(self._manifest_global_indices)\n"
+               "        if hasattr(self, \"_overfit_len\"):\n"
+               "            return self._overfit_len\n")
+    if old_len not in text:
+        raise SystemExit(f"Cannot patch subgoal dataset length in {path}")
+    text = text.replace(old_len, new_len, 1)
+    old_additional = ("    def _get_additional_data(self, sample, lerobot_sample):\n"
+                      "        sample[\"coarse_task\"] = lerobot_sample[\"coarse_task\"]\n"
+                      "        return sample\n")
+    new_additional = ("    def _get_additional_data(self, sample, lerobot_sample):\n"
+                      "        global_task = lerobot_sample.get(\"coarse_task\", lerobot_sample.get(\"task\", \"\"))\n"
+                      "        sample[\"coarse_task\"] = global_task\n"
+                      "        sample[\"_is_subgoal\"] = False\n"
+                      "        if self._sidecar_rows:\n"
+                      "            episode_index = lerobot_sample.get(\"episode_index\")\n"
+                      "            frame_index = lerobot_sample.get(\"frame_index\")\n"
+                      "            if hasattr(episode_index, \"item\"):\n"
+                      "                episode_index = episode_index.item()\n"
+                      "            if hasattr(frame_index, \"item\"):\n"
+                      "                frame_index = frame_index.item()\n"
+                      "            row = self._sidecar_rows.get((int(episode_index), int(frame_index)))\n"
+                      "            if row:\n"
+                      "                if self.preserve_global_task:\n"
+                      "                    sample[\"coarse_task\"] = row[\"task\"]\n"
+                      "                sample[\"task\"] = row[\"task\"]\n"
+                      "                sample[\"atomic_task\"] = row[\"subtask\"].removeprefix(\"Subtask: \").strip()\n"
+                      "                sample[\"_is_subgoal\"] = bool(row.get(\"is_subgoal\", row.get(\"subtask\", \"\") != row.get(\"task\", \"\")))\n"
+                      "                sample[\"_subgoal_action_horizon\"] = int(row.get(\"action_horizon\", 0))\n"
+                      "                if self.action_chunk_boundary == \"segment\" and \"action_is_pad\" in sample:\n"
+                      "                    horizon = max(0, min(int(row[\"action_horizon\"]), sample[\"action_is_pad\"].shape[0]))\n"
+                      "                    sample[\"action_is_pad\"] = sample[\"action_is_pad\"].clone()\n"
+                      "                    sample[\"action_is_pad\"][horizon:] = True\n"
+                      "        return sample\n")
+    if old_additional not in text:
+        raise SystemExit(f"Cannot patch subgoal task data in {path}")
+    text = text.replace(old_additional, new_additional, 1)
+    marker = "    def _get_ee_start_moving_step_of_episode(self, episode_idx: int) -> int:\n"
+    methods = ("    def _load_subgoal_manifest(self, path: Path):\n"
+               "        if not path.is_file():\n"
+               "            raise FileNotFoundError(f\"G0.5 subgoal manifest not found: {path}\")\n"
+               "        rows = []\n"
+               "        with path.open(encoding=\"utf-8\") as handle:\n"
+               "            for line in handle:\n"
+               "                row = json.loads(line)\n"
+               "                if \"episode_index\" in row and \"frame_index\" in row:\n"
+               "                    rows.append(row)\n"
+               "        episode_count = len(self.episode_data_index[\"from\"])\n"
+               "        train_cutoff = int(episode_count * (1.0 - self.val_set_proportion))\n"
+               "        selected = []\n"
+               "        for source_row in rows:\n"
+               "            row = dict(source_row)\n"
+               "            episode = int(row[\"episode_index\"])\n"
+               "            frame = int(row[\"frame_index\"])\n"
+               "            if episode < 0 or episode >= episode_count:\n"
+               "                continue\n"
+               "            if (episode < train_cutoff) != self.is_training_set:\n"
+               "                continue\n"
+               "            self._sidecar_rows[(episode, frame)] = row\n"
+               "            selected.append(int(self.episode_data_index[\"from\"][episode]) + frame)\n"
+               "        if not selected:\n"
+               "            split = \"training\" if self.is_training_set else \"validation\"\n"
+               "            raise RuntimeError(f\"No {split} samples in {path}\")\n"
+               "        self._manifest_global_indices = selected\n"
+               "        print(f\"[subgoal] loaded {path}: {len(selected)} samples\")\n\n")
+    if marker not in text:
+        raise SystemExit(f"Cannot insert subgoal manifest loader in {path}")
+    text = text.replace(marker, methods + marker, 1)
+    old_getitem = ("    def __getitem__(self, idx):\n"
+                   "        if idx >= len(self):\n"
+                   "            raise IndexError(f\"Index {idx} out of bounds.\")\n\n"
+                   "        if hasattr(self, \"_overfit_indices\"):\n"
+                   "            return super().__getitem__(idx)\n")
+    new_getitem = ("    def __getitem__(self, idx):\n"
+                   "        if idx < 0 or idx >= len(self):\n"
+                   "            raise IndexError(f\"Index {idx} out of bounds {len(self)}.\")\n\n"
+                   "        if self._manifest_global_indices is not None:\n"
+                   "            original_idx = self._manifest_global_indices[idx]\n"
+                   "            self._manifest_global_index_mode = True\n"
+                   "            try:\n"
+                   "                return super().__getitem__(original_idx)\n"
+                   "            finally:\n"
+                   "                self._manifest_global_index_mode = False\n\n"
+                   "        if hasattr(self, \"_overfit_indices\"):\n"
+                   "            return super().__getitem__(idx)\n")
+    if old_getitem not in text:
+        raise SystemExit(f"Cannot patch subgoal item mapping in {path}")
+    text = text.replace(old_getitem, new_getitem, 1)
+old_oracle_conditioning = "                sample[\"task\"] = row[\"subtask\"]\n"
+new_hierarchical_conditioning = ("                sample[\"task\"] = row[\"task\"]\n"
+                                 "                sample[\"atomic_task\"] = row[\"subtask\"].removeprefix(\"Subtask: \").strip()\n")
+if old_oracle_conditioning in text:
+    text = text.replace(old_oracle_conditioning, new_hierarchical_conditioning, 1)
+if "sample[\"_is_subgoal\"]" not in text:
+    marker = "        sample[\"coarse_task\"] = global_task\n"
+    replacement = marker + "        sample[\"_is_subgoal\"] = False\n"
+    if marker not in text:
+        raise SystemExit(f"Cannot add subgoal sample marker in {path}")
+    text = text.replace(marker, replacement, 1)
+    marker = "                sample[\"atomic_task\"] = row[\"subtask\"].removeprefix(\"Subtask: \").strip()\n"
+    replacement = (marker
+                   + "                sample[\"_is_subgoal\"] = bool(row.get(\"is_subgoal\", row.get(\"subtask\", \"\") != row.get(\"task\", \"\")))\n"
+                   + "                sample[\"_subgoal_action_horizon\"] = int(row.get(\"action_horizon\", 0))\n")
+    if marker not in text:
+        raise SystemExit(f"Cannot add subgoal sample metadata in {path}")
+    text = text.replace(marker, replacement, 1)
+path.write_text(text)
+print(f"[subgoal] patched {path}")
+PY
+"${VENV}/bin/python" - "${G05_ROOT}/src/g05/models/g05/g05_policy.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "        loss_value_dict = {k: v.detach() for k, v in loss_dict.items()}\n"
+new = ("        loss_value_dict = {k: v.detach() for k, v in loss_dict.items()}\n"
+       "        # Explicit W&B accounting for samples selected by the subgoal manifest.\n"
+       "        # The aggregate loss above already includes every sample; these fields\n"
+       "        # expose the denominator and subgoal coverage without affecting gradients.\n"
+       "        _subgoal_flags = [bool(s.get(\"_is_subgoal\", False)) for s in samples]\n"
+       "        _subgoal_count = sum(_subgoal_flags)\n"
+       "        _subgoal_fraction = _subgoal_count / max(1, len(_subgoal_flags))\n"
+       "        _subgoal_horizons = [int(s.get(\"_subgoal_action_horizon\", 0)) for s, flag in zip(samples, _subgoal_flags) if flag]\n"
+       "        loss_value_dict[\"train/subgoal_samples\"] = torch.tensor(float(_subgoal_count), device=device)\n"
+       "        loss_value_dict[\"train/total_samples\"] = torch.tensor(float(len(_subgoal_flags)), device=device)\n"
+       "        loss_value_dict[\"train/subgoal_fraction\"] = torch.tensor(float(_subgoal_fraction), device=device)\n"
+       "        loss_value_dict[\"train/subgoal_action_horizon_mean\"] = torch.tensor(float(sum(_subgoal_horizons) / len(_subgoal_horizons)) if _subgoal_horizons else 0.0, device=device)\n")
+if "train/subgoal_fraction" not in text:
+    if old not in text:
+        raise SystemExit(f"Cannot add subgoal W&B metrics in {path}")
+    text = text.replace(old, new, 1)
+    path.write_text(text)
+print(f"[metrics] subgoal W&B metrics patched {path}")
 PY
 "${VENV}/bin/python" -c 'import torch; assert torch.cuda.is_available(), "CUDA is unavailable"; print(f"[torch] {torch.__version__} CUDA={torch.version.cuda} GPU={torch.cuda.get_device_name(0)} capability={torch.cuda.get_device_capability(0)}")'
 export PATH="${VENV}/bin:${PATH}"
@@ -295,11 +481,12 @@ mkdir -p "${G05_ROOT}/configs/task"
 sed -i \
   "s#/personal/tianxing/RoboDojo/data/RoboDojo_lerobot_v30_video#${DATA_ROOT}#g" \
   "${G05_ROOT}/configs/task/robodojo_g05.yaml"
-# GOAI-2026 stores the LeRobot v3 videos as AV1. The Vast image's
-# torchcodec build does not decode these AV1 files reliably, which surfaces as
-# the misleading `'NoneType' object is not subscriptable` loader error.
-if ! grep -Eq "^[[:space:]]+video_backend:" "${G05_ROOT}/configs/task/robodojo_g05.yaml"; then
-  sed -i "/^[[:space:]]*lerobot_ds_version:[[:space:]]*['\"]\?3\.0['\"]\?$/a\\      video_backend: pyav" \
+G05_VIDEO_BACKEND="${G05_VIDEO_BACKEND:-pyav}"
+if grep -Eq "^[[:space:]]+video_backend:" "${G05_ROOT}/configs/task/robodojo_g05.yaml"; then
+  sed -i -E "s/^([[:space:]]+video_backend:)[[:space:]]*.*/\\1 ${G05_VIDEO_BACKEND}/" \
+    "${G05_ROOT}/configs/task/robodojo_g05.yaml"
+else
+  sed -i "/^[[:space:]]*lerobot_ds_version:[[:space:]]*['\"]\?3\.0['\"]\?$/a\\      video_backend: ${G05_VIDEO_BACKEND}" \
     "${G05_ROOT}/configs/task/robodojo_g05.yaml"
 fi
 echo "[dataset] video_backend=$(awk '/^[[:space:]]+video_backend:/{print $2; exit}' "${G05_ROOT}/configs/task/robodojo_g05.yaml")"
@@ -327,6 +514,25 @@ from pathlib import Path
 import sys
 from omegaconf import OmegaConf
 
+path = Path(sys.argv[1])
+cfg = OmegaConf.load(path)
+OmegaConf.set_struct(cfg, False)
+cfg.model.model_arch.predict_cot = True
+cfg.model.model_arch.action_attend_cot = True
+cfg.model.model_arch.discrete_action = False
+cfg.model.model_arch.continuous_action = True
+cfg.model.model_arch.return_continuous_action = True
+cfg.model.processor.samples_builder = {
+    "_target_": "g05.data_processor.processor.samples_builder.SubtaskCoTBuilderFMOnly"
+}
+OmegaConf.save(cfg, path)
+print("[subgoal] enabled main-task -> predicted-subgoal -> FM-action training")
+PY
+"${VENV}/bin/python" - "${G05_ROOT}/configs/task/robodojo_g05.yaml" <<'PY'
+from pathlib import Path
+import sys
+from omegaconf import OmegaConf
+
 cfg = OmegaConf.load(Path(sys.argv[1]))
 required = (
     "resume_ckpt",
@@ -335,6 +541,9 @@ required = (
     "model.grad_accumulation_steps",
     "model.pretrained_ckpt",
     "model.model_arch.hf_processor_path",
+    "model.model_arch.predict_cot",
+    "model.model_arch.action_attend_cot",
+    "model.processor.samples_builder._target_",
 )
 missing = []
 for path in required:
@@ -410,6 +619,24 @@ if [[ " ${G05_TRAIN_ARGS} " != *" model.max_steps="* && " ${G05_TRAIN_ARGS} " !=
   G05_TRAIN_ARGS+=" model.max_steps=${G05_MAX_STEPS}"
 fi
 G05_TRAIN_ARGS+=" model.model_arch.hf_processor_path=${G05_PROCESSOR_DIR}"
+# Native RoboDojo G05 uses the embodiment_datasets namespace. The leading
+# '+' is required because these fields are absent from the published config's
+# structured schema. Keep these overrides here so subgoal is enabled even
+# when the legacy XPolicyLab sidecar switch is disabled.
+G05_TRAIN_ARGS+=" +data.embodiment_datasets.robodojo.subgoal_manifest=${G05_SUBGOAL_MANIFEST}"
+G05_TRAIN_ARGS+=" +data.embodiment_datasets.robodojo.balanced_manifest=${G05_BALANCED_MANIFEST}"
+G05_TRAIN_ARGS+=" +data.embodiment_datasets.robodojo.preserve_global_task=true"
+G05_TRAIN_ARGS+=" +data.embodiment_datasets.robodojo.action_chunk_boundary=segment"
+# Throughput/LR settings validated for the Blackwell 96 GiB instance.
+G05_TRAIN_ARGS+=" model.batch_size=${G05_BATCH_SIZE}"
+G05_TRAIN_ARGS+=" model.learning_rate=0.0001"
+G05_TRAIN_ARGS+=" model.lr_min_ratio=0.1"
+G05_TRAIN_ARGS+=" model.constant_end_ratio=0.9"
+G05_TRAIN_ARGS+=" model.num_workers=16"
+G05_TRAIN_ARGS+=" model.prefetch_factor=4"
+if [[ "${G05_TORCH_COMPILE}" == "1" ]]; then
+  G05_TRAIN_ARGS+=" model.use_torch_compile=true"
+fi
 export G05_TRAIN_ARGS
 
 prune_loop() {
