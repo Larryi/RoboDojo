@@ -179,7 +179,9 @@ fi
 # The released G05 V3 loader currently has two compatibility issues with this
 # dataset: its in-memory path leaves hf_dataset unset while video timestamp
 # queries still dereference it, and video_backend is accepted by the config
-# but not forwarded from BaseLerobotDataset to MultiLeRobotDataset. Patch the
+# but not forwarded from BaseLerobotDataset to MultiLeRobotDataset. The
+# manifest-aware V3 loader also exposes a logical subset length while its
+# parent loader still needs to read the original global frame index. Patch the
 # cloned source idempotently at runtime so the launcher remains self-contained.
 "${VENV}/bin/python" - "${G05_ROOT}/src/g05/data/base_lerobot_dataset.py" <<'PY'
 from pathlib import Path
@@ -199,6 +201,39 @@ if "                video_backend=video_backend,\n" not in text:
     if old_call not in text:
         raise SystemExit(f"Cannot patch video_backend forwarding in {path}")
     text = text.replace(old_call, new_call, 1)
+
+# A manifest-aware subclass can expose len(self) == len(manifest), while its
+# __getitem__ translates a manifest position to an original global frame
+# index. The base loader must therefore validate/retry against the physical
+# dataset length, not the subclass's logical length.
+old_bounds = """    def __getitem__(self, idx):
+        if idx >= len(self):
+            raise IndexError(f\"Index {idx} out of bounds {len(self)}.\")
+
+        # Retry with random indices until we successfully load a frame.
+        sample_idx = idx
+"""
+new_bounds = """    def __getitem__(self, idx):
+        physical_len = self.multi_dataset.num_frames
+        if idx < 0 or idx >= physical_len:
+            raise IndexError(f\"Index {idx} out of bounds {physical_len}.\")
+
+        # Retry with random indices until we successfully load a frame.
+        sample_idx = idx
+"""
+if new_bounds not in text:
+    if old_bounds not in text:
+        raise SystemExit(f\"Cannot patch manifest index bounds in {path}\")
+    text = text.replace(old_bounds, new_bounds, 1)
+
+old_retry = "sample_idx = np.random.randint(len(self))"
+new_retry = "sample_idx = np.random.randint(physical_len)"
+if old_retry in text:
+    text = text.replace(old_retry, new_retry, 1)
+old_retry_base = "sample_idx = np.random.randint(BaseLerobotDataset.__len__(self))"
+if old_retry_base in text:
+    text = text.replace(old_retry_base, new_retry, 1)
+
 path.write_text(text)
 print(f"[loader] patched {path}")
 PY
