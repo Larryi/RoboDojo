@@ -121,8 +121,17 @@ if [[ -z "${PYTHON_310}" && -x "$(command -v conda 2>/dev/null || true)" ]]; the
   fi
   PYTHON_310="${CONDA_PREFIX_G05}/bin/python"
 fi
+if [[ -z "${PYTHON_310}" ]]; then
+  UV_BOOTSTRAP="${WORK_ROOT}/uv-bootstrap"
+  if [[ ! -x "${UV_BOOTSTRAP}/bin/uv" ]]; then
+    python3 -m venv "${UV_BOOTSTRAP}"
+    "${UV_BOOTSTRAP}/bin/python" -m pip install --upgrade pip uv
+  fi
+  "${UV_BOOTSTRAP}/bin/uv" python install 3.10.16
+  PYTHON_310="$("${UV_BOOTSTRAP}/bin/uv" python find 3.10.16)"
+fi
 [[ -x "${PYTHON_310}" ]] || {
-  echo "Python 3.10.16 is required by G05, but python3.10 was not found. Set G05_PYTHON or install Python 3.10 on the Vast image." >&2
+  echo "Unable to provision Python 3.10.16 for G05. Set G05_PYTHON to a Python 3.10 executable." >&2
   exit 3
 }
 
