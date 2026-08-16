@@ -159,6 +159,19 @@ elif [[ -f "${G05_ROOT}/GalaxeaVLA/pyproject.toml" ]]; then
   G05_ROOT="${G05_ROOT}/GalaxeaVLA"
   "${VENV}/bin/pip" install -e "${G05_ROOT}"
 fi
+# The RoboDojo task/data configs live in the XPolicyLab fork, while training
+# runs inside the separately cloned GalaxeaVLA checkout. Merge only these
+# adapter configs into the runtime Hydra tree.
+XPL_GALAXEA_ROOT="${REPO_ROOT}/XPolicyLab/policy/GalaxeaVLA/GalaxeaVLA"
+XPL_TASK_CONFIG="${XPL_GALAXEA_ROOT}/configs/task/real/g0plus_xpolicylab_finetune.yaml"
+XPL_DATA_CONFIG="${XPL_GALAXEA_ROOT}/configs/data/xpolicylab/dual_arm_joint_robodojo.yaml"
+[[ -f "${XPL_TASK_CONFIG}" && -f "${XPL_DATA_CONFIG}" ]] || {
+  echo "RoboDojo XPolicyLab Hydra configs are missing under ${XPL_GALAXEA_ROOT}" >&2
+  exit 7
+}
+mkdir -p "${G05_ROOT}/configs/task/real" "${G05_ROOT}/configs/data/xpolicylab"
+cp -f "${XPL_TASK_CONFIG}" "${G05_ROOT}/configs/task/real/"
+cp -f "${XPL_DATA_CONFIG}" "${G05_ROOT}/configs/data/xpolicylab/"
 # RTX PRO 6000 Blackwell is sm_120. The older torch pulled by some G05
 # dependency sets only contains kernels through sm_90. PyTorch 2.7 cu128 is
 # the first stable wheel family with Blackwell support.
