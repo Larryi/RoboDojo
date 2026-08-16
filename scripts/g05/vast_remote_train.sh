@@ -176,6 +176,32 @@ if [[ ! -f "${DEPS_MARKER}" ]]; then
 else
   echo "[deps] reusing ${VENV}; dependency installation already completed"
 fi
+# The released G05 V3 loader currently has two compatibility issues with this
+# dataset: its in-memory path leaves hf_dataset unset while video timestamp
+# queries still dereference it, and video_backend is accepted by the config
+# but not forwarded from BaseLerobotDataset to MultiLeRobotDataset. Patch the
+# cloned source idempotently at runtime so the launcher remains self-contained.
+"${VENV}/bin/python" - "${G05_ROOT}/src/g05/data/base_lerobot_dataset.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old_param = "        load_images: Optional[bool] = None,\n        in_memory: bool = False,\n"
+new_param = "        load_images: Optional[bool] = None,\n        video_backend: Optional[str] = None,\n        in_memory: bool = False,\n"
+if "video_backend: Optional[str] = None" not in text:
+    if old_param not in text:
+        raise SystemExit(f"Cannot patch video_backend parameter in {path}")
+    text = text.replace(old_param, new_param, 1)
+old_call = "                    load_images=self.load_images,\n                    in_memory=self.in_memory,\n"
+new_call = "                    load_images=self.load_images,\n                    video_backend=video_backend,\n                    in_memory=self.in_memory,\n"
+if "                    video_backend=video_backend,\n" not in text:
+    if old_call not in text:
+        raise SystemExit(f"Cannot patch video_backend forwarding in {path}")
+    text = text.replace(old_call, new_call, 1)
+path.write_text(text)
+print(f"[loader] patched {path}")
+PY
 "${VENV}/bin/python" -c 'import torch; assert torch.cuda.is_available(), "CUDA is unavailable"; print(f"[torch] {torch.__version__} CUDA={torch.version.cuda} GPU={torch.cuda.get_device_name(0)} capability={torch.cuda.get_device_capability(0)}")'
 export PATH="${VENV}/bin:${PATH}"
 hf auth whoami >/dev/null
@@ -242,6 +268,11 @@ if ! grep -Eq "^[[:space:]]+video_backend:" "${G05_ROOT}/configs/task/robodojo_g
     "${G05_ROOT}/configs/task/robodojo_g05.yaml"
 fi
 echo "[dataset] video_backend=$(awk '/^[[:space:]]+video_backend:/{print $2; exit}' "${G05_ROOT}/configs/task/robodojo_g05.yaml")"
+# The published config enables in_memory, but G05 V3 video timestamp queries
+# are not compatible with that mode. Keep the parquet mmap path instead.
+sed -i -E 's/^  in_memory:[[:space:]]*true$/  in_memory: false/' \
+  "${G05_ROOT}/configs/task/robodojo_g05.yaml"
+echo "[dataset] in_memory=$(awk '/^  in_memory:/{print $2; exit}' "${G05_ROOT}/configs/task/robodojo_g05.yaml")"
 "${VENV}/bin/python" - "${G05_ROOT}/configs/task/robodojo_g05.yaml" <<'PY'
 from pathlib import Path
 import sys
