@@ -109,7 +109,8 @@ git_clone_or_update "${G05_REPO_URL}" "${G05_REF}" "${G05_ROOT}"
 export HF_HOME="${WORK_ROOT}/cache/huggingface"
 export HF_DATASETS_CACHE="${WORK_ROOT}/cache/datasets"
 export TRANSFORMERS_CACHE="${WORK_ROOT}/cache/transformers"
-export HF_HUB_ENABLE_HF_TRANSFER=1
+: "${HF_HUB_ENABLE_HF_TRANSFER:=1}"
+export HF_HUB_ENABLE_HF_TRANSFER
 export HF_TOKEN
 export PYTHONUNBUFFERED=1
 mkdir -p "${HF_HOME}" "${HF_DATASETS_CACHE}" "${TRANSFORMERS_CACHE}"
@@ -143,6 +144,12 @@ if [[ ! -x "${VENV}/bin/python" ]]; then
 fi
 "${VENV}/bin/python" -m pip install --upgrade pip
 "${VENV}/bin/pip" install --upgrade "huggingface_hub[cli]" modelscope wandb
+if [[ "${HF_HUB_ENABLE_HF_TRANSFER}" == "1" ]]; then
+  if ! "${VENV}/bin/pip" install --upgrade hf_transfer; then
+    echo "[hf] hf_transfer unavailable; falling back to standard Hugging Face downloads" >&2
+    export HF_HUB_ENABLE_HF_TRANSFER=0
+  fi
+fi
 if [[ -f "${G05_ROOT}/pyproject.toml" ]]; then
   "${VENV}/bin/pip" install -e "${G05_ROOT}"
 elif [[ -f "${G05_ROOT}/GalaxeaVLA/pyproject.toml" ]]; then
