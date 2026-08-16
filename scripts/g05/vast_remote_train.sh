@@ -145,19 +145,29 @@ fi
 if [[ ! -x "${VENV}/bin/python" ]]; then
   "${PYTHON_310}" -m venv "${VENV}"
 fi
-"${VENV}/bin/python" -m pip install --upgrade pip
-"${VENV}/bin/pip" install --upgrade "huggingface_hub[cli]" modelscope wandb
-if [[ "${HF_HUB_ENABLE_HF_TRANSFER}" == "1" ]]; then
-  if ! "${VENV}/bin/pip" install --upgrade hf_transfer; then
-    echo "[hf] hf_transfer unavailable; falling back to standard Hugging Face downloads" >&2
-    export HF_HUB_ENABLE_HF_TRANSFER=0
-  fi
-fi
-if [[ -f "${G05_ROOT}/pyproject.toml" ]]; then
-  "${VENV}/bin/pip" install -e "${G05_ROOT}"
-elif [[ -f "${G05_ROOT}/GalaxeaVLA/pyproject.toml" ]]; then
+DEPS_MARKER="${VENV}/.g05_deps_ready"
+if [[ -f "${G05_ROOT}/GalaxeaVLA/pyproject.toml" ]]; then
   G05_ROOT="${G05_ROOT}/GalaxeaVLA"
-  "${VENV}/bin/pip" install -e "${G05_ROOT}"
+fi
+if [[ ! -f "${DEPS_MARKER}" ]]; then
+  "${VENV}/bin/python" -m pip install --upgrade pip
+  "${VENV}/bin/pip" install --upgrade "huggingface_hub[cli]" modelscope wandb
+  if [[ "${HF_HUB_ENABLE_HF_TRANSFER}" == "1" ]]; then
+    if ! "${VENV}/bin/pip" install --upgrade hf_transfer; then
+      echo "[hf] hf_transfer unavailable; falling back to standard Hugging Face downloads" >&2
+      export HF_HUB_ENABLE_HF_TRANSFER=0
+    fi
+  fi
+  if [[ -f "${G05_ROOT}/pyproject.toml" ]]; then
+    "${VENV}/bin/pip" install -e "${G05_ROOT}"
+  fi
+  # RTX PRO 6000 Blackwell is sm_120. Install the CUDA 12.8 wheel family.
+  "${VENV}/bin/pip" install --upgrade \
+    "torch==${G05_TORCH_VERSION}" \
+    --index-url "${G05_TORCH_INDEX_URL}"
+  touch "${DEPS_MARKER}"
+else
+  echo "[deps] reusing ${VENV}; dependency installation already completed"
 fi
 # The RoboDojo task/data configs live in the XPolicyLab fork, while training
 # runs inside the separately cloned GalaxeaVLA checkout. Merge only these
@@ -165,19 +175,15 @@ fi
 XPL_GALAXEA_ROOT="${REPO_ROOT}/XPolicyLab/policy/GalaxeaVLA/GalaxeaVLA"
 XPL_TASK_CONFIG="${XPL_GALAXEA_ROOT}/configs/task/real/g0plus_xpolicylab_finetune.yaml"
 XPL_DATA_CONFIG="${XPL_GALAXEA_ROOT}/configs/data/xpolicylab/dual_arm_joint_robodojo.yaml"
-[[ -f "${XPL_TASK_CONFIG}" && -f "${XPL_DATA_CONFIG}" ]] || {
+XPL_MODEL_CONFIG="${XPL_GALAXEA_ROOT}/configs/model/vla/g0plus.yaml"
+[[ -f "${XPL_TASK_CONFIG}" && -f "${XPL_DATA_CONFIG}" && -f "${XPL_MODEL_CONFIG}" ]] || {
   echo "RoboDojo XPolicyLab Hydra configs are missing under ${XPL_GALAXEA_ROOT}" >&2
   exit 7
 }
-mkdir -p "${G05_ROOT}/configs/task/real" "${G05_ROOT}/configs/data/xpolicylab"
+mkdir -p "${G05_ROOT}/configs/task/real" "${G05_ROOT}/configs/data/xpolicylab" "${G05_ROOT}/configs/model/vla"
 cp -f "${XPL_TASK_CONFIG}" "${G05_ROOT}/configs/task/real/"
 cp -f "${XPL_DATA_CONFIG}" "${G05_ROOT}/configs/data/xpolicylab/"
-# RTX PRO 6000 Blackwell is sm_120. The older torch pulled by some G05
-# dependency sets only contains kernels through sm_90. PyTorch 2.7 cu128 is
-# the first stable wheel family with Blackwell support.
-"${VENV}/bin/pip" install --upgrade \
-  "torch==${G05_TORCH_VERSION}" \
-  --index-url "${G05_TORCH_INDEX_URL}"
+cp -f "${XPL_MODEL_CONFIG}" "${G05_ROOT}/configs/model/vla/"
 "${VENV}/bin/python" -c 'import torch; assert torch.cuda.is_available(), "CUDA is unavailable"; print(f"[torch] {torch.__version__} CUDA={torch.version.cuda} GPU={torch.cuda.get_device_name(0)} capability={torch.cuda.get_device_capability(0)}")'
 export PATH="${VENV}/bin:${PATH}"
 hf auth whoami >/dev/null
