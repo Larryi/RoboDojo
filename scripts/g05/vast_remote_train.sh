@@ -270,10 +270,14 @@ fi
 export G05_ACTION_TOKENIZER_PATH="${ASSET_ROOT}/${HF_G05_ACTION_TOKENIZER_PATH}"
 G05_PROCESSOR_DIR="${ASSET_ROOT}/${HF_G05_PROCESSOR_PATH}"
 export G05_PROCESSOR_DIR
+if [[ -n "${G05_INIT_CKPT:-}" && -d "${G05_INIT_CKPT}" ]]; then
+  G05_INIT_CKPT="$(find "${G05_INIT_CKPT}" -type f \( -name model_state_dict.pt -o -name checkpoint.pt -o -name checkpoint -o -name model.pt \) | sort | head -1 || true)"
+fi
 if [[ -z "${G05_INIT_CKPT:-}" ]]; then
   G05_INIT_CKPT="$(find "${MODEL_ROOT}" -type f \( -name model_state_dict.pt -o -name checkpoint.pt -o -name checkpoint \) | sort | head -1 || true)"
-  [[ -n "${G05_INIT_CKPT}" ]] && G05_INIT_CKPT="$(dirname "${G05_INIT_CKPT}")"
 fi
+[[ -f "${G05_INIT_CKPT:-}" ]] || { echo "G05 checkpoint file not found: ${G05_INIT_CKPT:-<empty>}" >&2; exit 9; }
+echo "[checkpoint] using file ${G05_INIT_CKPT}"
 export G05_INIT_CKPT
 
 if [[ "${G05_AUTO_RESUME}" == "1" && -z "${G05_RESUME:-}" ]]; then
