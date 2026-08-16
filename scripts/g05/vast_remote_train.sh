@@ -36,7 +36,8 @@ set +a
 : "${G05_KEEP_CHECKPOINTS:=1}"
 : "${G05_AUTO_RESUME:=1}"
 : "${G05_RUN_ID:=g05_robodojo_$(date +%Y%m%d_%H%M%S)}"
-: "${G05_TRAIN_TASK:=real/g0plus_xpolicylab_finetune}"
+: "${G05_TRAIN_TASK:=robodojo_g05}"
+: "${G05_USE_SIDECAR:=0}"
 : "${G05_DATASET_SOURCE:=huggingface}"
 
 RUN_ROOT="${WORK_ROOT}/runs/${G05_RUN_ID}"
@@ -169,21 +170,6 @@ if [[ ! -f "${DEPS_MARKER}" ]]; then
 else
   echo "[deps] reusing ${VENV}; dependency installation already completed"
 fi
-# The RoboDojo task/data configs live in the XPolicyLab fork, while training
-# runs inside the separately cloned GalaxeaVLA checkout. Merge only these
-# adapter configs into the runtime Hydra tree.
-XPL_GALAXEA_ROOT="${REPO_ROOT}/XPolicyLab/policy/GalaxeaVLA/GalaxeaVLA"
-XPL_TASK_CONFIG="${XPL_GALAXEA_ROOT}/configs/task/real/g0plus_xpolicylab_finetune.yaml"
-XPL_DATA_CONFIG="${XPL_GALAXEA_ROOT}/configs/data/xpolicylab/dual_arm_joint_robodojo.yaml"
-XPL_MODEL_CONFIG="${XPL_GALAXEA_ROOT}/configs/model/vla/g0plus.yaml"
-[[ -f "${XPL_TASK_CONFIG}" && -f "${XPL_DATA_CONFIG}" && -f "${XPL_MODEL_CONFIG}" ]] || {
-  echo "RoboDojo XPolicyLab Hydra configs are missing under ${XPL_GALAXEA_ROOT}" >&2
-  exit 7
-}
-mkdir -p "${G05_ROOT}/configs/task/real" "${G05_ROOT}/configs/data/xpolicylab" "${G05_ROOT}/configs/model/vla"
-cp -f "${XPL_TASK_CONFIG}" "${G05_ROOT}/configs/task/real/"
-cp -f "${XPL_DATA_CONFIG}" "${G05_ROOT}/configs/data/xpolicylab/"
-cp -f "${XPL_MODEL_CONFIG}" "${G05_ROOT}/configs/model/vla/"
 "${VENV}/bin/python" -c 'import torch; assert torch.cuda.is_available(), "CUDA is unavailable"; print(f"[torch] {torch.__version__} CUDA={torch.version.cuda} GPU={torch.cuda.get_device_name(0)} capability={torch.cuda.get_device_capability(0)}")'
 export PATH="${VENV}/bin:${PATH}"
 hf auth whoami >/dev/null
@@ -231,6 +217,14 @@ elif [[ ! -f "${MODEL_ROOT}/.downloaded" ]]; then
   fi
   touch "${MODEL_ROOT}/.downloaded"
 fi
+CHECKPOINT_CONFIG="${MODEL_ROOT}/${HF_CHECKPOINT_PATH}/.hydra/config.yaml"
+[[ -f "${CHECKPOINT_CONFIG}" ]] || { echo "G05 checkpoint Hydra config missing: ${CHECKPOINT_CONFIG}" >&2; exit 8; }
+mkdir -p "${G05_ROOT}/configs/task"
+cp -f "${CHECKPOINT_CONFIG}" "${G05_ROOT}/configs/task/robodojo_g05.yaml"
+# The published config contains the original machine-local dataset path.
+sed -i \
+  "s#/personal/tianxing/RoboDojo/data/RoboDojo_lerobot_v30_video#${DATA_ROOT}#g" \
+  "${G05_ROOT}/configs/task/robodojo_g05.yaml"
 export G05_BASE_ASSETS="${ASSET_ROOT}"
 if [[ ! -f "${ASSET_ROOT}/${HF_G05_PROCESSOR_PATH}/config.json" || ! -f "${ASSET_ROOT}/${HF_G05_ACTION_TOKENIZER_PATH}" ]]; then
   echo "[assets] downloading G05 processor and action tokenizer from ${HF_G05_BASE_REPO}"
