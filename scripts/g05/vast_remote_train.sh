@@ -231,6 +231,32 @@ cp -f "${CHECKPOINT_CONFIG}" "${G05_ROOT}/configs/task/robodojo_g05.yaml"
 sed -i \
   "s#/personal/tianxing/RoboDojo/data/RoboDojo_lerobot_v30_video#${DATA_ROOT}#g" \
   "${G05_ROOT}/configs/task/robodojo_g05.yaml"
+"${VENV}/bin/python" - "${G05_ROOT}/configs/task/robodojo_g05.yaml" <<'PY'
+from pathlib import Path
+import sys
+from omegaconf import OmegaConf
+
+cfg = OmegaConf.load(Path(sys.argv[1]))
+required = (
+    "resume_ckpt",
+    "checkpointing_steps",
+    "model.batch_size",
+    "model.grad_accumulation_steps",
+    "model.pretrained_ckpt",
+    "model.model_arch.hf_processor_path",
+)
+missing = []
+for path in required:
+    node = cfg
+    for part in path.split("."):
+        if part not in node:
+            missing.append(path)
+            break
+        node = node[part]
+if missing:
+    raise SystemExit("G05 checkpoint config missing expected keys: " + ", ".join(missing))
+print("[config] RoboDojo G05 checkpoint schema validated")
+PY
 export G05_BASE_ASSETS="${ASSET_ROOT}"
 if [[ ! -f "${ASSET_ROOT}/${HF_G05_PROCESSOR_PATH}/config.json" || ! -f "${ASSET_ROOT}/${HF_G05_ACTION_TOKENIZER_PATH}" ]]; then
   echo "[assets] downloading G05 processor and action tokenizer from ${HF_G05_BASE_REPO}"
@@ -279,10 +305,8 @@ mkdir -p "${G05_OUTPUT_ROOT}" "${GALAXEA_FM_DATASET_STATS_CACHE_DIR}"
 # The RoboDojo checkpoint's Hydra config contains the publisher's absolute
 # processor path. Override it with the processor downloaded above.
 G05_TRAIN_ARGS="${G05_TRAIN_ARGS:-}"
-# Migrate legacy G0Plus override names that may still be present in the
-# user's secrets file; native RoboDojo G05 keeps these at the config root.
-G05_TRAIN_ARGS="${G05_TRAIN_ARGS//model.batch_size/batch_size}"
-G05_TRAIN_ARGS="${G05_TRAIN_ARGS//model.grad_accumulation_steps/grad_accumulation_steps}"
+# Migrate only the resume key from older launchers; batch size and gradient
+# accumulation belong under model in the published RoboDojo checkpoint config.
 G05_TRAIN_ARGS="${G05_TRAIN_ARGS//checkpoint.resume/resume_ckpt}"
 G05_TRAIN_ARGS+=" model.model_arch.hf_processor_path=${G05_PROCESSOR_DIR}"
 export G05_TRAIN_ARGS
