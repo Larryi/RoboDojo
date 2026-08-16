@@ -280,6 +280,13 @@ G05_LINEAR_ATTN_BACKEND="${G05_LINEAR_ATTN_BACKEND:-torch}"
 sed -i -E "s/(^[[:space:]]*linear_attn_backend:)[[:space:]]*.*/\\1 ${G05_LINEAR_ATTN_BACKEND}/" \
   "${G05_ROOT}/configs/task/robodojo_g05.yaml"
 echo "[model] linear_attn_backend=$(awk '/^[[:space:]]+linear_attn_backend:/{print $2; exit}' "${G05_ROOT}/configs/task/robodojo_g05.yaml")"
+# The published task config leaves eval_steps null, but finetune.py performs
+# modulo arithmetic on it after the first optimizer steps.
+if grep -Eq '^eval_steps:[[:space:]]*null[[:space:]]*$' "${G05_ROOT}/configs/task/robodojo_g05.yaml"; then
+  sed -i -E 's/^eval_steps:[[:space:]]*null[[:space:]]*$/eval_steps: 1000/' \
+    "${G05_ROOT}/configs/task/robodojo_g05.yaml"
+fi
+echo "[train] eval_steps=$(awk '/^eval_steps:/{print $2; exit}' "${G05_ROOT}/configs/task/robodojo_g05.yaml")"
 "${VENV}/bin/python" - "${G05_ROOT}/configs/task/robodojo_g05.yaml" <<'PY'
 from pathlib import Path
 import sys
