@@ -525,7 +525,9 @@ cfg.model.model_arch.return_continuous_action = True
 cfg.model.model_arch.ar.ce_weight = 1.0
 cfg.model.processor.drop_high_level_prob = 0.0
 cfg.model.processor.samples_builder = {
-    "_target_": "g05.data_processor.processor.samples_builder.SubtaskCoTBuilderFMOnly"
+    "_target_": "g05.data_processor.processor.samples_builder.SubtaskCoTBuilderFMOnly",
+    "num_input_images": "${model.model_arch.num_input_images}",
+    "image_sizes": "${model.processor.camera_size_config}",
 }
 path.write_text("# @package _global_\n\n" + OmegaConf.to_yaml(cfg), encoding="utf-8")
 print("[subgoal] enabled main-task -> predicted-subgoal -> FM-action training")
