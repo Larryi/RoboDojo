@@ -532,6 +532,35 @@ if "Removed external resume checkpoint" not in text:
     path.write_text(text.replace(old, new, 1))
 print(f"[checkpoint] pre-save single-file retention patched {path}")
 PY
+"${VENV}/bin/python" - "${G05_ROOT}/scripts/finetune.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+if "skip empty optimizer state on model-only resume" not in text:
+    old = "        optimizer.load_state_dict(checkpoint[\"optimizer_state_dict\"])\n"
+    new = (
+        "        # Final exported checkpoints may intentionally omit optimizer state.\n"
+        "        # In that case continue from the model weights with a fresh optimizer.\n"
+        "        # skip empty optimizer state on model-only resume\n"
+        "        if checkpoint.get(\"optimizer_state_dict\") is not None:\n"
+        "            optimizer.load_state_dict(checkpoint[\"optimizer_state_dict\"])\n"
+    )
+    if old not in text:
+        raise SystemExit(f"Cannot guard optimizer resume in {path}")
+    text = text.replace(old, new, 1)
+    old_sched = "        scheduler.load_state_dict(checkpoint[\"scheduler_state_dict\"])\n"
+    new_sched = (
+        "        if checkpoint.get(\"scheduler_state_dict\") is not None:\n"
+        "            scheduler.load_state_dict(checkpoint[\"scheduler_state_dict\"])\n"
+    )
+    if old_sched not in text:
+        raise SystemExit(f"Cannot guard scheduler resume in {path}")
+    text = text.replace(old_sched, new_sched, 1)
+    path.write_text(text)
+print(f"[checkpoint] empty optimizer/scheduler resume guard patched {path}")
+PY
 "${VENV}/bin/python" - "${G05_ROOT}/scripts/utils/metric.py" <<'PY'
 from pathlib import Path
 import sys
