@@ -512,6 +512,23 @@ if "this Vast" not in text:
     if old not in text:
         raise SystemExit(f"Cannot patch pre-save checkpoint pruning in {path}")
     path.write_text(text.replace(old, new, 1))
+    text = path.read_text()
+if "Removed external resume checkpoint" not in text:
+    old = "                _checkpoint_dir = output_dir / \"checkpoints\"\n"
+    new = (
+        "                # The resumed checkpoint can live outside this run. It is\n"
+        "                # already fully loaded into memory by this point; remove it\n"
+        "                # immediately before replacement so the volume never needs\n"
+        "                # to hold two ~34 GB G05 checkpoints.\n"
+        "                _resume_checkpoint = Path(str(getattr(cfg, \"resume_ckpt\", \"\")))\n"
+        "                if _resume_checkpoint.is_file() and _resume_checkpoint.parent != output_dir / \"checkpoints\":\n"
+        "                    _resume_checkpoint.unlink()\n"
+        "                    logger.info(f\"Removed external resume checkpoint {_resume_checkpoint}\")\n"
+        "                _checkpoint_dir = output_dir / \"checkpoints\"\n"
+    )
+    if old not in text:
+        raise SystemExit(f"Cannot add external-resume checkpoint cleanup in {path}")
+    path.write_text(text.replace(old, new, 1))
 print(f"[checkpoint] pre-save single-file retention patched {path}")
 PY
 "${VENV}/bin/python" - "${G05_ROOT}/scripts/utils/metric.py" <<'PY'
