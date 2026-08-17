@@ -32,7 +32,7 @@ set +a
 : "${G05_GPUS:=0}"
 : "${G05_TORCH_VERSION:=2.7.1}"
 : "${G05_TORCH_INDEX_URL:=https://download.pytorch.org/whl/cu128}"
-: "${G05_SAVE_INTERVAL_STEPS:=5000}"
+: "${G05_SAVE_INTERVAL_STEPS:=2000}"
 : "${G05_KEEP_CHECKPOINTS:=1}"
 : "${G05_AUTO_RESUME:=1}"
 : "${G05_RUN_ID:=g05_robodojo_$(date +%Y%m%d_%H%M%S)}"
@@ -40,6 +40,11 @@ set +a
 : "${G05_USE_SIDECAR:=0}"
 : "${G05_TORCH_COMPILE:=0}"
 : "${G05_BATCH_SIZE:=10}"
+: "${G05_MAX_STEPS:=10000}"
+: "${G05_LEARNING_RATE:=0.00002}"
+: "${G05_LR_MIN_RATIO:=0.05}"
+: "${G05_WARMUP_RATIO:=0.05}"
+: "${G05_CONSTANT_END_RATIO:=0.20}"
 # Older secrets files may still carry the legacy PaliGemma task. It is not
 # compatible with the Qwen3.5 RoboDojo checkpoint; transparently migrate it.
 if [[ "${G05_TRAIN_TASK}" == "real/g0plus_xpolicylab_finetune" ]]; then
@@ -423,6 +428,38 @@ if "train/subgoal_fraction" not in text:
     path.write_text(text)
 print(f"[metrics] subgoal W&B metrics patched {path}")
 PY
+"${VENV}/bin/python" - "${G05_ROOT}/scripts/utils/metric.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = '        ar_cot_acc_model = action_preds.get("cot_accuracy", -1.0)\n'
+new = (
+    '        ar_cot_acc_model = action_preds.get("cot_accuracy", -1.0)\n'
+    '        # G05 inference returns generated CoT text but no numeric CoT metric.\n'
+    '        # Compare it with the annotated atomic_task so rollout eval measures\n'
+    '        # autonomous subgoal generation instead of logging the -1 sentinel.\n'
+    '        predicted_cot = action_preds.get("cot_text")\n'
+    '        gt_samples = batch.get("samples", [])\n'
+    '        if isinstance(predicted_cot, (list, tuple)) and len(predicted_cot) == len(gt_samples) and predicted_cot:\n'
+    '            def _normalize_cot(value):\n'
+    '                value = " ".join(str(value or "").strip().split()).casefold()\n'
+    '                if value.startswith("subtask:"):\n'
+    '                    value = value[len("subtask:"):].strip()\n'
+    '                return value.rstrip(" .")\n'
+    '            gt_cot = [sample.get("atomic_task", "") for sample in gt_samples]\n'
+    '            ar_cot_acc_model = sum(\n'
+    '                _normalize_cot(pred) == _normalize_cot(gt)\n'
+    '                for pred, gt in zip(predicted_cot, gt_cot)\n'
+    '            ) / len(predicted_cot)\n'
+)
+if "autonomous subgoal generation" not in text:
+    if old not in text:
+        raise SystemExit(f"Cannot patch rollout CoT accuracy in {path}")
+    path.write_text(text.replace(old, new, 1))
+print(f"[metrics] rollout CoT exact-match patched {path}")
+PY
 "${VENV}/bin/python" -c 'import torch; assert torch.cuda.is_available(), "CUDA is unavailable"; print(f"[torch] {torch.__version__} CUDA={torch.version.cuda} GPU={torch.cuda.get_device_name(0)} capability={torch.cuda.get_device_capability(0)}")'
 export PATH="${VENV}/bin:${PATH}"
 hf auth whoami >/dev/null
@@ -620,7 +657,6 @@ G05_TRAIN_ARGS="${G05_TRAIN_ARGS//checkpoint.resume/resume_ckpt}"
 # The published checkpoint leaves both max_epochs and max_steps null, but the
 # released finetune.py requires one of them to build the LR scheduler.
 if [[ " ${G05_TRAIN_ARGS} " != *" model.max_steps="* && " ${G05_TRAIN_ARGS} " != *" model.max_epochs="* ]]; then
-  G05_MAX_STEPS="${G05_MAX_STEPS:-100000}"
   G05_TRAIN_ARGS+=" model.max_steps=${G05_MAX_STEPS}"
 fi
 G05_TRAIN_ARGS+=" model.model_arch.hf_processor_path=${G05_PROCESSOR_DIR}"
@@ -634,9 +670,10 @@ G05_TRAIN_ARGS+=" +data.embodiment_datasets.robodojo.preserve_global_task=true"
 G05_TRAIN_ARGS+=" +data.embodiment_datasets.robodojo.action_chunk_boundary=segment"
 # Throughput/LR settings validated for the Blackwell 96 GiB instance.
 G05_TRAIN_ARGS+=" model.batch_size=${G05_BATCH_SIZE}"
-G05_TRAIN_ARGS+=" model.learning_rate=0.0001"
-G05_TRAIN_ARGS+=" model.lr_min_ratio=0.1"
-G05_TRAIN_ARGS+=" model.constant_end_ratio=0.9"
+G05_TRAIN_ARGS+=" model.learning_rate=${G05_LEARNING_RATE}"
+G05_TRAIN_ARGS+=" model.lr_min_ratio=${G05_LR_MIN_RATIO}"
+G05_TRAIN_ARGS+=" model.warmup_ratio=${G05_WARMUP_RATIO}"
+G05_TRAIN_ARGS+=" model.constant_end_ratio=${G05_CONSTANT_END_RATIO}"
 G05_TRAIN_ARGS+=" model.num_workers=16"
 G05_TRAIN_ARGS+=" model.prefetch_factor=4"
 if [[ "${G05_TORCH_COMPILE}" == "1" ]]; then
