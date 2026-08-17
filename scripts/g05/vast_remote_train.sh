@@ -45,6 +45,7 @@ set +a
 : "${G05_LR_MIN_RATIO:=0.05}"
 : "${G05_WARMUP_RATIO:=0.05}"
 : "${G05_CONSTANT_END_RATIO:=0.20}"
+: "${G05_LANGUAGE_LOSS_WEIGHT:=10.0}"
 # Older secrets files may still carry the legacy PaliGemma task. It is not
 # compatible with the Qwen3.5 RoboDojo checkpoint; transparently migrate it.
 if [[ "${G05_TRAIN_TASK}" == "real/g0plus_xpolicylab_finetune" ]]; then
@@ -402,6 +403,29 @@ if "sample[\"_is_subgoal\"]" not in text:
 path.write_text(text)
 print(f"[subgoal] patched {path}")
 PY
+"${VENV}/bin/python" - "${G05_ROOT}/src/g05/data_processor/processor/samples_builder.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "        self._populate_extra_samples(data, samples)\n\n        samples[\"template\"] = tpl\n"
+new = (
+    "        self._populate_extra_samples(data, samples)\n\n"
+    "        # Preserve RoboDojo manifest metadata after the builder creates its\n"
+    "        # new sample dictionary. Without this, training was supervised by\n"
+    "        # atomic_task but monitoring incorrectly reported zero subgoals.\n"
+    "        for key in (\"_is_subgoal\", \"_subgoal_action_horizon\"):\n"
+    "            if key in data:\n"
+    "                samples[key] = data[key]\n\n"
+    "        samples[\"template\"] = tpl\n"
+)
+if "Preserve RoboDojo manifest metadata" not in text:
+    if old not in text:
+        raise SystemExit(f"Cannot patch samples-builder metadata propagation in {path}")
+    path.write_text(text.replace(old, new, 1))
+print(f"[subgoal] metadata propagation patched {path}")
+PY
 "${VENV}/bin/python" - "${G05_ROOT}/src/g05/models/g05/g05_policy.py" <<'PY'
 from pathlib import Path
 import sys
@@ -427,6 +451,51 @@ if "train/subgoal_fraction" not in text:
     text = text.replace(old, new, 1)
     path.write_text(text)
 print(f"[metrics] subgoal W&B metrics patched {path}")
+PY
+"${VENV}/bin/python" - "${G05_ROOT}/src/g05/models/g05/g05_policy.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "        loss_value_dict = {k: v.detach() for k, v in loss_dict.items()}\n"
+new = (
+    "        loss_value_dict = {k: v.detach() for k, v in loss_dict.items()}\n"
+    "        # FM-only CoT templates have no action-token labels, so every\n"
+    "        # non-masked AR label is part of the generated subgoal/format target.\n"
+    "        _cot_target_tokens = int((labels[..., 1:] != -100).sum().item())\n"
+    "        loss_value_dict[\"train/cot_target_tokens\"] = torch.tensor(float(_cot_target_tokens), device=device)\n"
+)
+if "train/cot_target_tokens" not in text:
+    if old not in text:
+        raise SystemExit(f"Cannot patch CoT target-token metric in {path}")
+    path.write_text(text.replace(old, new, 1))
+print(f"[metrics] CoT target-token accounting patched {path}")
+PY
+"${VENV}/bin/python" - "${G05_ROOT}/scripts/finetune.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "                logger.info(f\"Saving model checkpoint for step {step} ...\")\n"
+new = (
+    "                logger.info(f\"Saving model checkpoint for step {step} ...\")\n"
+    "                # A full G05 training checkpoint is ~34 GB and this Vast\n"
+    "                # volume cannot hold two. Remove older complete files before\n"
+    "                # writing the replacement; the official base remains fallback.\n"
+    "                _checkpoint_dir = output_dir / \"checkpoints\"\n"
+    "                if _checkpoint_dir.is_dir():\n"
+    "                    for _old_checkpoint in _checkpoint_dir.glob(\"step_*.pt\"):\n"
+    "                        if _old_checkpoint.name != f\"step_{step}.pt\":\n"
+    "                            _old_checkpoint.unlink()\n"
+    "                            logger.info(f\"Removed previous checkpoint {_old_checkpoint}\")\n"
+)
+if "this Vast" not in text:
+    if old not in text:
+        raise SystemExit(f"Cannot patch pre-save checkpoint pruning in {path}")
+    path.write_text(text.replace(old, new, 1))
+print(f"[checkpoint] pre-save single-file retention patched {path}")
 PY
 "${VENV}/bin/python" - "${G05_ROOT}/scripts/utils/metric.py" <<'PY'
 from pathlib import Path
@@ -677,6 +746,7 @@ G05_TRAIN_ARGS+=" model.learning_rate=${G05_LEARNING_RATE}"
 G05_TRAIN_ARGS+=" model.lr_min_ratio=${G05_LR_MIN_RATIO}"
 G05_TRAIN_ARGS+=" model.warmup_ratio=${G05_WARMUP_RATIO}"
 G05_TRAIN_ARGS+=" model.constant_end_ratio=${G05_CONSTANT_END_RATIO}"
+G05_TRAIN_ARGS+=" +model.model_arch.language_loss_weight=${G05_LANGUAGE_LOSS_WEIGHT}"
 G05_TRAIN_ARGS+=" model.num_workers=16"
 G05_TRAIN_ARGS+=" model.prefetch_factor=4"
 if [[ "${G05_TORCH_COMPILE}" == "1" ]]; then
