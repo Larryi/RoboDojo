@@ -34,6 +34,7 @@ set +a
 : "${G05_TORCH_INDEX_URL:=https://download.pytorch.org/whl/cu128}"
 : "${G05_SAVE_INTERVAL_STEPS:=2000}"
 : "${G05_KEEP_CHECKPOINTS:=1}"
+: "${G05_UPLOAD:=0}"
 : "${G05_AUTO_RESUME:=1}"
 : "${G05_RUN_ID:=g05_robodojo_$(date +%Y%m%d_%H%M%S)}"
 : "${G05_TRAIN_TASK:=robodojo_g05}"
@@ -820,9 +821,13 @@ latest="$(find "${G05_OUTPUT_ROOT}" \
   \( -type d \( -name 'step_*' -o -name 'global_step_*' -o -name 'checkpoint-*' \) \
      -o -type f -path '*/checkpoints/step_*.pt' \) | sort -V | tail -1)"
 [[ -n "${latest}" && -e "${latest}" ]] || { echo "No final checkpoint found" >&2; exit 6; }
-hf repos create "${HF_OUTPUT_REPO}" --type model --public --exist-ok
-hf upload "${HF_OUTPUT_REPO}" "${latest}" "${G05_RUN_ID}/$(basename "${latest}")" \
-  --repo-type model --commit-message "G05 training final checkpoint ${G05_RUN_ID}"
-hf upload "${HF_OUTPUT_REPO}" "${RUN_ROOT}/artifacts" "${G05_RUN_ID}/artifacts" \
-  --repo-type model --commit-message "G05 training manifest ${G05_RUN_ID}"
+if [[ "${G05_UPLOAD}" == "1" ]]; then
+  hf repo create "${HF_OUTPUT_REPO}" --repo-type model --exist-ok
+  hf upload "${HF_OUTPUT_REPO}" "${latest}" "${G05_RUN_ID}/$(basename "${latest}")" \
+    --repo-type model --commit-message "G05 training final checkpoint ${G05_RUN_ID}"
+  hf upload "${HF_OUTPUT_REPO}" "${RUN_ROOT}/artifacts" "${G05_RUN_ID}/artifacts" \
+    --repo-type model --commit-message "G05 training manifest ${G05_RUN_ID}"
+else
+  echo "[upload] disabled; keeping final checkpoint locally: ${latest}"
+fi
 write_status complete
