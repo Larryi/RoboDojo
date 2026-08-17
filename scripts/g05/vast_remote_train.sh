@@ -620,7 +620,10 @@ echo "[checkpoint] using file ${G05_INIT_CKPT}"
 export G05_INIT_CKPT
 
 if [[ "${G05_AUTO_RESUME}" == "1" && -z "${G05_RESUME:-}" ]]; then
-  G05_RESUME="$(find "${WORK_ROOT}/runs" -type d \( -name 'step_*' -o -name 'global_step_*' -o -name 'checkpoint-*' \) ! -path "${RUN_ROOT}/*" | sort -V | tail -1 || true)"
+  G05_RESUME="$(find "${WORK_ROOT}/runs" \
+    \( -type d \( -name 'step_*' -o -name 'global_step_*' -o -name 'checkpoint-*' \) \
+       -o -type f -path '*/checkpoints/step_*.pt' \) \
+    ! -path "${RUN_ROOT}/*" | sort -V | tail -1 || true)"
   export G05_RESUME
   [[ -z "${G05_RESUME}" ]] || echo "[resume] automatically using ${G05_RESUME}"
 fi
@@ -683,11 +686,18 @@ export G05_TRAIN_ARGS
 
 prune_loop() {
   while true; do
-    mapfile -t checkpoints < <(find "${G05_OUTPUT_ROOT}" -type d \( -name 'step_*' -o -name 'global_step_*' -o -name 'checkpoint-*' \) -mmin +2 | sort -V)
+    mapfile -t checkpoints < <(find "${G05_OUTPUT_ROOT}" \
+      \( -type d \( -name 'step_*' -o -name 'global_step_*' -o -name 'checkpoint-*' \) \
+         -o -type f -path '*/checkpoints/step_*.pt' \) \
+      -mmin +2 | sort -V)
     if (( ${#checkpoints[@]} > G05_KEEP_CHECKPOINTS )); then
       local remove_count=$((${#checkpoints[@]} - G05_KEEP_CHECKPOINTS))
       for ((i=0; i<remove_count; i++)); do
-        rm -rf "${checkpoints[i]}"
+        if [[ -d "${checkpoints[i]}" ]]; then
+          rm -rf -- "${checkpoints[i]}"
+        else
+          rm -f -- "${checkpoints[i]}"
+        fi
         echo "[prune] removed ${checkpoints[i]}"
       done
     fi
@@ -708,8 +718,10 @@ wait "${PRUNE_PID}" 2>/dev/null || true
 (( train_rc == 0 )) || exit "${train_rc}"
 
 write_status uploading
-latest="$(find "${G05_OUTPUT_ROOT}" -type d \( -name 'step_*' -o -name 'global_step_*' -o -name 'checkpoint-*' \) | sort -V | tail -1)"
-[[ -n "${latest}" && -d "${latest}" ]] || { echo "No final checkpoint found" >&2; exit 6; }
+latest="$(find "${G05_OUTPUT_ROOT}" \
+  \( -type d \( -name 'step_*' -o -name 'global_step_*' -o -name 'checkpoint-*' \) \
+     -o -type f -path '*/checkpoints/step_*.pt' \) | sort -V | tail -1)"
+[[ -n "${latest}" && -e "${latest}" ]] || { echo "No final checkpoint found" >&2; exit 6; }
 hf repos create "${HF_OUTPUT_REPO}" --type model --public --exist-ok
 hf upload "${HF_OUTPUT_REPO}" "${latest}" "${G05_RUN_ID}/$(basename "${latest}")" \
   --repo-type model --commit-message "G05 training final checkpoint ${G05_RUN_ID}"
