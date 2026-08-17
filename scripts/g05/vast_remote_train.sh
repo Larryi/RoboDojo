@@ -749,14 +749,8 @@ if [[ " ${G05_TRAIN_ARGS} " != *" model.max_steps="* && " ${G05_TRAIN_ARGS} " !=
   G05_TRAIN_ARGS+=" model.max_steps=${G05_MAX_STEPS}"
 fi
 G05_TRAIN_ARGS+=" model.model_arch.hf_processor_path=${G05_PROCESSOR_DIR}"
-# Native RoboDojo G05 uses the embodiment_datasets namespace. The leading
-# '+' is required because these fields are absent from the published config's
-# structured schema. Keep these overrides here so subgoal is enabled even
-# when the legacy XPolicyLab sidecar switch is disabled.
-G05_TRAIN_ARGS+=" +data.embodiment_datasets.robodojo.subgoal_manifest=${G05_SUBGOAL_MANIFEST}"
-G05_TRAIN_ARGS+=" +data.embodiment_datasets.robodojo.balanced_manifest=${G05_BALANCED_MANIFEST}"
-G05_TRAIN_ARGS+=" +data.embodiment_datasets.robodojo.preserve_global_task=true"
-G05_TRAIN_ARGS+=" +data.embodiment_datasets.robodojo.action_chunk_boundary=segment"
+# XPolicyLab's G05 launcher owns the sidecar Hydra overrides. Keeping a single
+# owner avoids duplicate '+' additions during config composition.
 # Throughput/LR settings validated for the Blackwell 96 GiB instance.
 G05_TRAIN_ARGS+=" model.batch_size=${G05_BATCH_SIZE}"
 G05_TRAIN_ARGS+=" model.learning_rate=${G05_LEARNING_RATE}"
